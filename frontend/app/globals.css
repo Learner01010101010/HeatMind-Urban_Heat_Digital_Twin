@@ -1,0 +1,334 @@
+@import "tailwindcss";
+
+/* ─────────────────────────────────────────────────────────────
+   HeatMind — premium climate-tech design system
+   dark glass · large type · the map is the hero
+   ───────────────────────────────────────────────────────────── */
+@theme {
+  --color-ink-950: #030509;
+  --color-ink-900: #080b12;
+  --color-ink-850: #0c1019;
+  --color-ink-800: #111622;
+  --color-ink-700: #1a2130;
+  --color-ink-600: #283043;
+  --color-ink-500: #3b4559;
+  --color-ink-400: #6e7a90;
+  --color-ink-300: #9aa5b8;
+  --color-ink-200: #c7cfdc;
+  --color-ink-100: #eef2f7;
+
+  --color-cool-400: #34e2c6;
+  --color-cool-300: #6ff0da;
+  --color-cool-500: #14c3a8;
+  --color-sky-glow: #4cc3ff;
+  --color-violet-glow: #a78bfa;
+
+  --color-heat-0: #1d4ed8;
+  --color-heat-1: #0ea5b7;
+  --color-heat-2: #22c55e;
+  --color-heat-3: #facc15;
+  --color-heat-4: #fb8a1f;
+  --color-heat-5: #ef4444;
+  --color-heat-6: #7f1d1d;
+
+  --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+:root {
+  color-scheme: dark;
+  --heat-gradient: linear-gradient(90deg, #1d4ed8 0%, #0ea5b7 25%, #22c55e 50%, #facc15 66%, #fb8a1f 78.5%, #ef4444 89.3%, #7f1d1d 100%);
+  --cool-gradient: linear-gradient(135deg, #6ff0da 0%, #4cc3ff 100%);
+}
+
+html,
+body {
+  background: var(--color-ink-950);
+  color: var(--color-ink-100);
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.005em;
+}
+
+html.senior {
+  font-size: 118%;
+}
+
+::selection {
+  background: rgba(52, 226, 198, 0.3);
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── glass ─── */
+.glass {
+  background: linear-gradient(180deg, rgba(22, 27, 38, 0.72), rgba(12, 15, 22, 0.66));
+  backdrop-filter: blur(24px) saturate(170%);
+  -webkit-backdrop-filter: blur(24px) saturate(170%);
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 12px 40px -12px rgba(0, 0, 0, 0.65),
+    0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.glass-strong {
+  background: linear-gradient(180deg, rgba(18, 22, 32, 0.9), rgba(9, 12, 18, 0.9));
+  backdrop-filter: blur(32px) saturate(180%);
+  -webkit-backdrop-filter: blur(32px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 30px 80px -20px rgba(0, 0, 0, 0.8);
+}
+
+.hairline {
+  border-color: rgba(255, 255, 255, 0.07);
+}
+
+.heat-gradient {
+  background: var(--heat-gradient);
+}
+
+.text-cool-gradient {
+  background: var(--cool-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: #283043 transparent;
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* ─── pressable ─── */
+.press {
+  transition:
+    transform 0.25s var(--ease-spring),
+    background-color 0.2s,
+    border-color 0.2s,
+    box-shadow 0.25s;
+}
+.press:active {
+  transform: scale(0.96);
+}
+
+/* ─── MapLibre skin ─── */
+.maplibregl-map {
+  font-family: var(--font-sans);
+}
+.maplibregl-ctrl-attrib {
+  background: rgba(3, 5, 9, 0.55) !important;
+  color: #6e7a90 !important;
+  font-size: 10px !important;
+  border-radius: 8px 0 0 0;
+}
+.maplibregl-ctrl-attrib a {
+  color: #9aa5b8 !important;
+}
+.maplibregl-ctrl-attrib-button {
+  filter: invert(1) opacity(0.5);
+}
+.maplibregl-popup-content {
+  background: linear-gradient(180deg, rgba(22, 27, 38, 0.92), rgba(10, 13, 20, 0.94)) !important;
+  backdrop-filter: blur(24px);
+  color: #eef2f7;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px !important;
+  padding: 14px 16px !important;
+  box-shadow: 0 20px 50px -10px rgba(0, 0, 0, 0.7) !important;
+}
+.maplibregl-popup-tip {
+  display: none;
+}
+.maplibregl-popup-close-button {
+  color: #6e7a90;
+  font-size: 18px;
+  right: 8px;
+  top: 6px;
+}
+
+/* ─── map markers ─── */
+.hm-pin {
+  cursor: grab;
+  filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.55));
+  transition: transform 0.3s var(--ease-spring);
+}
+.hm-pin:hover {
+  transform: translateY(-2px) scale(1.05);
+}
+
+.hm-route-chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+  backdrop-filter: blur(12px);
+}
+
+@keyframes hot-ping {
+  0% { transform: scale(0.5); opacity: 0.9; }
+  100% { transform: scale(3); opacity: 0; }
+}
+.hm-hotspot {
+  position: relative;
+  width: 14px;
+  height: 14px;
+}
+.hm-hotspot::before,
+.hm-hotspot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+}
+.hm-hotspot::before {
+  background: var(--c, #ef4444);
+  animation: hot-ping 2s var(--ease-out-expo) infinite;
+}
+.hm-hotspot::after {
+  background: var(--c, #ef4444);
+  border: 2px solid #030509;
+  box-shadow: 0 0 18px var(--c, #ef4444);
+}
+
+/* ─── range (timeline) ─── */
+input[type="range"].hm-range {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  outline: none;
+  cursor: pointer;
+}
+input[type="range"].hm-range::-webkit-slider-runnable-track {
+  height: 26px;
+}
+input[type="range"].hm-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 22px;
+  height: 26px;
+  background: transparent;
+  cursor: grab;
+}
+input[type="range"].hm-range::-moz-range-thumb {
+  width: 22px;
+  height: 26px;
+  border: 0;
+  background: transparent;
+  cursor: grab;
+}
+
+input[type="range"].hm-mini {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  background: #1a2130;
+  outline: none;
+}
+input[type="range"].hm-mini::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(251, 138, 31, 0.25), 0 4px 10px rgba(0, 0, 0, 0.5);
+  cursor: grab;
+}
+input[type="range"].hm-mini::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: #fff;
+  border: 0;
+}
+
+/* ─── motion ─── */
+@keyframes rise-in {
+  from { transform: translateY(14px) scale(0.98); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+.rise-in {
+  animation: rise-in 0.55s var(--ease-out-expo) both;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.fade-in {
+  animation: fade-in 0.4s ease both;
+}
+
+@keyframes pop-in {
+  from { transform: scale(0.9) translateY(8px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+.pop-in {
+  animation: pop-in 0.45s var(--ease-spring) both;
+  transform-origin: bottom right;
+}
+
+@keyframes shimmer {
+  0% { background-position: -300px 0; }
+  100% { background-position: 300px 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, rgba(255,255,255,0.03) 0px, rgba(255,255,255,0.07) 120px, rgba(255,255,255,0.03) 240px);
+  background-size: 600px 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(251, 138, 31, 0.45); }
+  50% { box-shadow: 0 0 0 8px rgba(251, 138, 31, 0); }
+}
+.glow-pulse {
+  animation: glow-pulse 2.2s ease-in-out infinite;
+}
+
+@keyframes aurora {
+  0% { transform: translate3d(0, 0, 0) rotate(0deg); }
+  50% { transform: translate3d(4%, -3%, 0) rotate(8deg); }
+  100% { transform: translate3d(0, 0, 0) rotate(0deg); }
+}
+.aurora {
+  animation: aurora 18s ease-in-out infinite;
+}
+
+@keyframes spin-slow {
+  to { transform: rotate(360deg); }
+}
+
+/* Reduced motion (OS setting or in-app toggle) */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+}
+html.reduce-motion *,
+html.reduce-motion *::before,
+html.reduce-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+}
