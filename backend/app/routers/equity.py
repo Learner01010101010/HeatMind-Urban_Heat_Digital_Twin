@@ -11,7 +11,9 @@ router = APIRouter(prefix="/api/equity", tags=["heat equity"])
 
 @router.get("/index")
 def equity_index(scenario: str = "live", time: str | None = None, offset_min: int = Query(0, ge=0, le=720),
-                 temp_delta: float = 0.0, agg: int = Query(4, ge=1, le=10)):
+                 temp_delta: float = 0.0,
+                 agg: int | None = Query(None, ge=1, le=16,
+                                         description="Cells per overlay polygon. Default scales with the zone.")):
     """SDG 10 — Heat Vulnerability Index: heat x cooling-deficit x cooling-access-deficit.
 
     NOT a demographic layer (no census/income data exists for this zone) — an

@@ -25,6 +25,10 @@ from .services.zone import CODE_LABEL, get_zone
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    # Attach a live traffic feed if one is configured. Without a key this is a
+    # no-op and the modelled congestion curve stays in place, labelled as modelled.
+    from .services.traffic import install as install_traffic
+    install_traffic()
     get_planner()  # warm the zone rasters + street graph
     tw = get_twin()
     tw.frame(base_time(), "live")
@@ -97,10 +101,12 @@ def anthropogenic(time: str | None = None):
 
     from .services.anthropogenic import describe
 
+    from .services.traffic import traffic_service
+
     when = datetime.fromisoformat(time) if time else base_time()
     if when.tzinfo is None:
         when = when.replace(tzinfo=base_time().tzinfo)
-    return describe(get_zone(), when)
+    return {**describe(get_zone(), when), "traffic_provider": traffic_service.describe()}
 
 
 @app.get("/api/zone/fields", tags=["meta"])

@@ -60,7 +60,13 @@ def congestion_factor(when: datetime) -> float:
     """Relative traffic density at `when`, interpolated between hourly keyframes."""
     if _override is not None:
         try:
-            return float(_override(when))
+            live = _override(when)
+            # None is the documented way for a feed to say "I have nothing for this
+            # moment" -- no key, provider down, or a forecast hour it cannot observe.
+            # That is a normal answer, not a failure, and the modelled curve below is
+            # the honest fallback for it.
+            if live is not None:
+                return float(live)
         except Exception:  # a flaky feed must never take the twin down
             pass
     table = _WEEKEND if when.weekday() >= 5 else _WEEKDAY

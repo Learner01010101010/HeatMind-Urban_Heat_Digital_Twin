@@ -7,6 +7,31 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
+
+
+def _load_dotenv() -> None:
+    """Read backend/.env into the environment, without adding a dependency.
+
+    Secrets belong in .env (which is gitignored), but nothing was reading it, so a
+    key put there had no effect and looked like a broken provider. Real environment
+    variables always win, so a deployment's own configuration is never overridden by
+    a file someone left in their checkout.
+    """
+    path = BASE_DIR / ".env"
+    if not path.exists():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_dotenv()
 OSM_RAW = DATA_DIR / "osm_raw.json"
 ZONE_FILE = DATA_DIR / "zone.json"
 DB_FILE = Path(os.environ.get("HEATMIND_DB", DATA_DIR / "heatmind.sqlite3"))
@@ -57,6 +82,11 @@ COLOR_MIN_C = 20.0
 COLOR_MAX_C = 56.0
 
 # All calculations are anchored to the live current time — there is no fixed demo timestamp.
+
+# Live traffic (TomTom Flow Segment Data). Unset means the twin keeps using its
+# modelled Pune congestion curve and says so in /api/meta — it never fabricates a
+# live reading. Set it in backend/.env, which is gitignored.
+TOMTOM_KEY = os.environ.get("HEATMIND_TOMTOM_KEY", "")
 
 # Optional LLM polish for explanations (never blocks the UI)
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")

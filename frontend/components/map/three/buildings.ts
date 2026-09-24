@@ -3,6 +3,7 @@
 import * as THREE from "three";
 import type { BuildingProps, Typology } from "@/lib/api";
 import type { TwinFields } from "./fields";
+import { makeLutTexture } from "./fields";
 import { REVEAL_GLSL } from "./reveal";
 
 /**
@@ -46,6 +47,24 @@ const TINT: [number, number, number][] = [
   [0.55, 0.53, 0.5], // shed
   [0.72, 0.62, 0.52], // temple
 ];
+
+// Surface temperature rise over air at full normal-incidence sun, °C.
+//
+// The same form the backend uses for ground (T = air + gain · I · exposure), applied
+// per face, so a wall's temperature depends on which way it faces. That is the whole
+// point: at 16:00 a west-facing wall is taking near-normal incidence while the east
+// face of the same building is in its own shadow, and until now both rendered
+// identically. Plastered masonry sits around 14–18; exposed concrete runs hotter.
+const WALL_GAIN = [14.0, 15.0, 13.0, 17.0, 15.0, 16.0, 16.0, 19.0, 15.0];
+// Roofs are the hottest surfaces in a tropical city and the ones an aerial view
+// actually sees. A tin or asbestos shed roof reaches 25–30 °C over air in May sun;
+// a concrete terrace is heavy and lags, so it gains less but holds it far longer.
+const ROOF_GAIN = [20.0, 22.0, 20.0, 28.0, 21.0, 22.0, 23.0, 30.0, 21.0];
+// Fraction of the peak gain a surface still holds once the sun is off it — thermal
+// mass. Light sheet metal dumps its heat within minutes; masonry and concrete
+// re-radiate into the street for hours, which is most of why cities do not cool at
+// night. Indexed the same way.
+const THERMAL_MASS = [0.34, 0.30, 0.34, 0.20, 0.36, 0.34, 0.30, 0.08, 0.36];
 
 const VERT = `
 attribute vec2 aFacade;     // u = metres along the wall, v = metres above ground
@@ -101,6 +120,14 @@ uniform float uFloorH[9];
 uniform float uWinPitch[9];
 uniform float uGlazing[9];
 uniform vec3 uTint[9];
+
+// --- surface temperature -----------------------------------------------------
+uniform sampler2D uLut;      // the one heat scale, shared with the ground plane
+uniform float uAirC;         // ambient air temperature now, °C
+uniform float uHeatMix;      // 0 disables facade heat entirely
+uniform float uWallGain[9];
+uniform float uRoofGain[9];
+uniform float uThermalMass[9];
 ${REVEAL_GLSL}
 
 float hash(float n) { return fract(sin(n * 43758.5453) * 12345.6789); }
@@ -179,6 +206,47 @@ void main() {
 
   float spec = pow(ndl, 24.0) * glassMask * uSunIntensity;
   col += uSunColor * spec * 0.55;
+
+  // ---- surface temperature of this face --------------------------------------
+  // Same form as the backend's ground model, T = air + gain · I · exposure, but
+  // evaluated per face so orientation decides the answer. The direct term already carries
+  // the cosine of incidence and the shadow term, so a wall the sun never reaches
+  // gets nothing from the first term and only its stored heat from the second.
+  float gain = mix(uWallGain[ti], uRoofGain[ti], vRoof);
+  float stored = uThermalMass[ti] * gain * (1.0 - uSunIntensity);
+
+  // Low floors sit in the long-wave bath of the pavement in front of them, which is
+  // why the bottom few metres of a street wall run hotter than the same wall higher
+  // up. Falls off over roughly two storeys and only counts where the ground is
+  // actually in sun.
+  float groundLift = 3.4 * (1.0 - groundShadow) * uSunIntensity
+                   * (1.0 - smoothstep(0.0, 9.0, vFacade.y)) * (1.0 - vRoof);
+
+  // Enclosure cuts a surface's ability to radiate to the sky, so a wall deep in a
+  // canyon sheds heat more slowly than the same wall on an open street.
+  float trapped = (1.0 - clamp(svf, 0.0, 1.0)) * 2.6;
+
+  float excess = gain * direct + stored + groundLift + trapped;
+  float surfaceC = uAirC + excess;
+
+  // The LUT is indexed exactly as the ground plane indexes it (feels_c = 20 + v/4),
+  // so a hot wall and hot tarmac at the same temperature read as the same colour.
+  vec3 heatCol = texture2D(uLut, vec2(clamp((surfaceC - 20.0) * 4.0 / 255.0, 0.0, 1.0), 0.5)).rgb;
+
+  // The ramp starts high on purpose. Almost every sunlit surface in Pune runs
+  // 10-15 degrees over air, so tinting from there repaints the whole city and the
+  // scene stops being architecture and becomes a chart. Full strength is reserved
+  // for roughly 26 degrees over air, which in practice means sheet-metal roofs in
+  // afternoon sun -- the surfaces actually worth pointing at. Even there the
+  // material keeps most of its identity; heat modulates it rather than replacing it.
+  float heat = uHeatMix * smoothstep(6.0, 26.0, excess);
+  col = mix(col, col * 0.62 + heatCol * 0.55, heat * 0.42);
+  // A little self-illumination so a hot face reads as hot even when it is pointing
+  // away from the camera's light, without lifting the whole building.
+  col += heatCol * heat * 0.10;
+  // Glass does not bake the way masonry does — it reflects rather than absorbs.
+  col = mix(col, albedo * (skyTint * ambient + uSunColor * direct) + uSunColor * spec * 0.55,
+            glassMask * 0.65);
 
   float litSeed = hash(vSeed + floor(vFacade.y / 3.0) * 7.0 + floor(vFacade.x / 3.0));
   float lit = step(0.5, uNight) * glassMask * step(0.42, litSeed);
@@ -342,6 +410,12 @@ export class Buildings {
         uWinPitch: { value: WIN_PITCH },
         uGlazing: { value: GLAZING },
         uTint: { value: TINT.map((c) => new THREE.Color(c[0], c[1], c[2])) },
+        uLut: { value: makeLutTexture() },
+        uAirC: { value: 30 },
+        uHeatMix: { value: 1 },
+        uWallGain: { value: WALL_GAIN },
+        uRoofGain: { value: ROOF_GAIN },
+        uThermalMass: { value: THERMAL_MASS },
         uReveal: { value: reveal },
         uRevealOn: { value: 0 },
       },
@@ -353,12 +427,18 @@ export class Buildings {
     this.triangles = used / 3;
   }
 
-  setSun(dir: THREE.Vector3, intensity: number, night: boolean, color: THREE.Color) {
+  setSun(dir: THREE.Vector3, intensity: number, night: boolean, color: THREE.Color, airC?: number) {
     const u = this.material.uniforms;
     u.uSunDir.value.copy(dir);
     u.uSunIntensity.value = intensity;
     u.uNight.value = night ? 1 : 0;
     u.uSunColor.value.copy(color);
+    if (airC !== undefined) u.uAirC.value = airC;
+  }
+
+  /** 0 leaves buildings as plain material; 1 shows their surface temperature. */
+  setHeatMix(v: number) {
+    this.material.uniforms.uHeatMix.value = v;
   }
 
   setGrow(g: number) {

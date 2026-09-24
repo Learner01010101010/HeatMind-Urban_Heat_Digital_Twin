@@ -26,17 +26,49 @@ from .zone import get_zone
 POI_SATURATION_M = 400.0  # distance beyond which "access deficit" maxes out
 WEIGHTS = {"heat": 0.45, "cooling_deficit": 0.30, "access_deficit": 0.25}
 
+# Upper bound on polygons in the overlay's GeoJSON. The old fixed agg=4 produced
+# ~2,700 cells over the campus zone and 23,399 over Narhe-to-Swargate, which is a
+# 5 MB response for a translucent overlay nobody reads cell by cell.
+MAX_SURFACE_FEATURES = 6000
+
+# POIs do not move and the grid does not change under them, so this is computed
+# once per zone. Recomputing it per request was most of a 26-second response.
+_poi_cache: tuple[tuple, np.ndarray] | None = None
+
 
 def _poi_distance_grid() -> np.ndarray:
+    """Metres to the nearest cooling POI, saturated at POI_SATURATION_M.
+
+    Two things make this cheap that did not used to be. It is cached, because
+    nothing it depends on changes while a zone is loaded. And each POI only writes
+    into the box it can actually influence: the access deficit saturates at
+    POI_SATURATION_M, so a cell no POI reaches already holds its final value and
+    never needs visiting. Over this zone that is an 83x83 box instead of 841x444 --
+    54x less work per POI, across 2,684 of them.
+
+    The result is exact, not an approximation: the saturated floor is the same
+    number the old full-grid version would have produced for those cells.
+    """
+    global _poi_cache
     z = get_zone()
     R, C = geo.ROWS, geo.COLS
-    if not z.pois:
-        return np.full((R, C), POI_SATURATION_M, dtype=float)
-    best = np.full((R, C), np.inf)
+    key = (R, C, geo.CELL_M, len(z.pois))
+    if _poi_cache is not None and _poi_cache[0] == key:
+        return _poi_cache[1]
+
+    best = np.full((R, C), POI_SATURATION_M, dtype=float)
+    reach = int(np.ceil(POI_SATURATION_M / geo.CELL_M)) + 1
     for p in z.pois:
         px, py = geo.to_xy(p["lat"], p["lon"])
-        d = np.hypot(geo._CX - px, geo._CY - py)
-        np.minimum(best, d, out=best)
+        r, c = geo.latlon_to_cell(p["lat"], p["lon"])
+        r0, r1 = max(0, r - reach), min(R, r + reach + 1)
+        c0, c1 = max(0, c - reach), min(C, c + reach + 1)
+        if r0 >= r1 or c0 >= c1:
+            continue  # POI outside the grid
+        sub = np.hypot(geo._CX[r0:r1, c0:c1] - px, geo._CY[r0:r1, c0:c1] - py)
+        np.minimum(best[r0:r1, c0:c1], sub, out=best[r0:r1, c0:c1])
+
+    _poi_cache = (key, best)
     return best
 
 
@@ -51,12 +83,25 @@ def vulnerability_grid(f: Frame) -> dict:
     return {"index": idx, "heat": heat, "cooling_deficit": cooling_deficit, "access_deficit": access_deficit}
 
 
-def equity_geojson(f: Frame, agg: int = 4) -> dict:
+def auto_agg(rows: int, cols: int) -> int:
+    """Cells per overlay polygon, chosen to keep the response a sane size.
+
+    A fixed block size does not survive a change of zone: 4 was right for 4 km2 and
+    is 23,399 polygons over 37 km2. Scaling it with the grid keeps the overlay's
+    payload roughly constant, which matters more than its resolution -- it is a
+    translucent risk wash, not something read cell by cell.
+    """
+    return max(4, int(np.ceil(np.sqrt(rows * cols / MAX_SURFACE_FEATURES))))
+
+
+def equity_geojson(f: Frame, agg: int | None = None) -> dict:
     tw = get_twin()
     g = vulnerability_grid(f)
     idx = g["index"]
     feats = []
     R, C = idx.shape
+    if agg is None:
+        agg = auto_agg(R, C)
     for r in range(0, R, agg):
         for c in range(0, C, agg):
             block = idx[r:r + agg, c:c + agg]

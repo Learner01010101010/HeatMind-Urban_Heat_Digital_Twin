@@ -27,6 +27,8 @@ export interface SunState {
   elevationDeg: number;
   azimuthDeg: number;
   intensity: number;
+  /** Ambient air temperature, °C — the baseline every surface temperature sits on. */
+  airC?: number;
 }
 
 export interface FrameRef {
@@ -191,7 +193,7 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     else this.sunColor.copy(DAY);
 
     const intensity = e > 0 ? this.sun.intensity : 0;
-    this.buildings?.setSun(this.sunDir, intensity, e <= 2, this.sunColor);
+    this.buildings?.setSun(this.sunDir, intensity, e <= 2, this.sunColor, this.sun.airC);
     this.roads?.setSun(intensity, this.sunColor);
     this.trees?.setSun(this.sunDir, intensity, this.sunColor);
   }

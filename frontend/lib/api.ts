@@ -37,7 +37,16 @@ export interface Conditions {
   scenario: Scenario;
   temp_delta_c: number;
   weather: Weather;
-  sun: { elevation_deg: number; azimuth_deg: number; intensity: number; is_day: boolean };
+  sun: {
+    elevation_deg: number;
+    azimuth_deg: number;
+    intensity: number;
+    is_day: boolean;
+    /** Fraction of clear-sky irradiance reaching the ground. */
+    clearness?: number;
+    /** "measured" (observed shortwave) or "modelled_from_cloud". */
+    clearness_source?: string;
+  };
   stats: TwinStats;
 }
 
