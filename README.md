@@ -56,6 +56,8 @@ Optional: `set ANTHROPIC_API_KEY=...` before starting the backend enables an LLM
 > .venv/bin/python get-pip.py && rm get-pip.py
 > ```
 
+`npm run dev` also auto-generates `frontend/AGENTS.md` and `frontend/CLAUDE.md` on every start (a Next.js 16 feature). They're gitignored like `next-env.d.ts` — don't commit them, they're regenerated locally each run.
+
 ---
 
 ## What's inside (the 5 engines)
