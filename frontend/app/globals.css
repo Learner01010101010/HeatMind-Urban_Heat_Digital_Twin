@@ -5,29 +5,29 @@
    dark glass · large type · the map is the hero
    ───────────────────────────────────────────────────────────── */
 @theme {
-  --color-ink-950: #030509;
-  --color-ink-900: #080b12;
-  --color-ink-850: #0c1019;
-  --color-ink-800: #111622;
-  --color-ink-700: #1a2130;
-  --color-ink-600: #283043;
-  --color-ink-500: #3b4559;
-  --color-ink-400: #6e7a90;
-  --color-ink-300: #9aa5b8;
-  --color-ink-200: #c7cfdc;
-  --color-ink-100: #eef2f7;
+  --color-ink-950: #060606;
+  --color-ink-900: #0e0d0c;
+  --color-ink-850: #131312;
+  --color-ink-800: #1b1a18;
+  --color-ink-700: #272523;
+  --color-ink-600: #383633;
+  --color-ink-500: #4e4b46;
+  --color-ink-400: #858179;
+  --color-ink-300: #adaaa5;
+  --color-ink-200: #d4d2cf;
+  --color-ink-100: #f3f3f2;
 
-  --color-cool-400: #f2f4f8;
-  --color-cool-300: #c7cfdc;
-  --color-cool-500: #d7dce6;
-  --color-sky-glow: #c7cfdc;
-  --color-violet-glow: #c7cfdc;
+  --color-cool-400: #f5f5f4;
+  --color-cool-300: #d4d2cf;
+  --color-cool-500: #e0dfdd;
+  --color-sky-glow: #d4d2cf;
+  --color-violet-glow: #d4d2cf;
 
-  --color-heat-0: #1d4ed8;
-  --color-heat-1: #0ea5b7;
-  --color-heat-2: #22c55e;
-  --color-heat-3: #facc15;
-  --color-heat-4: #fb8a1f;
+  --color-heat-0: #4a5048;
+  --color-heat-1: #727e56;
+  --color-heat-2: #b2a652;
+  --color-heat-3: #e8a238;
+  --color-heat-4: #f16c2c;
   --color-heat-5: #ef4444;
   --color-heat-6: #7f1d1d;
 
@@ -40,7 +40,7 @@
 
 :root {
   color-scheme: dark;
-  --heat-gradient: linear-gradient(90deg, #1d4ed8 0%, #0ea5b7 25%, #22c55e 50%, #facc15 66%, #fb8a1f 78.5%, #ef4444 89.3%, #7f1d1d 100%);
+  --heat-gradient: linear-gradient(90deg, #4a5048 0%, #727e56 19.4%, #b2a652 33.3%, #e8a238 52.8%, #f16c2c 69.4%, #df342c 88.9%, #ba1e32 100%);
 }
 
 html,
@@ -61,7 +61,7 @@ html.senior {
 }
 
 ::selection {
-  background: rgba(52, 226, 198, 0.3);
+  background: rgba(111, 191, 94, 0.3);
 }
 
 .tabular {
@@ -91,7 +91,7 @@ html.senior {
 
 .scroll-thin {
   scrollbar-width: thin;
-  scrollbar-color: #283043 transparent;
+  scrollbar-color: #383633 transparent;
 }
 
 .no-scrollbar {
@@ -118,21 +118,21 @@ html.senior {
   font-family: var(--font-sans);
 }
 .maplibregl-ctrl-attrib {
-  background: rgba(3, 5, 9, 0.55) !important;
-  color: #6e7a90 !important;
+  background: rgba(6, 6, 6, 0.55) !important;
+  color: #858179 !important;
   font-size: 10px !important;
   border-radius: 8px 0 0 0;
 }
 .maplibregl-ctrl-attrib a {
-  color: #9aa5b8 !important;
+  color: #adaaa5 !important;
 }
 .maplibregl-ctrl-attrib-button {
   filter: invert(1) opacity(0.5);
 }
 .maplibregl-popup-content {
-  background: linear-gradient(180deg, rgba(22, 27, 38, 0.92), rgba(10, 13, 20, 0.94)) !important;
+  background: linear-gradient(180deg, rgba(32, 31, 29, 0.92), rgba(16, 15, 14, 0.94)) !important;
   backdrop-filter: blur(24px);
-  color: #eef2f7;
+  color: #f3f3f2;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 18px !important;
   padding: 14px 16px !important;
@@ -142,7 +142,7 @@ html.senior {
   display: none;
 }
 .maplibregl-popup-close-button {
-  color: #6e7a90;
+  color: #858179;
   font-size: 18px;
   right: 8px;
   top: 6px;
@@ -192,7 +192,7 @@ html.senior {
 }
 .hm-hotspot::after {
   background: var(--c, #ef4444);
-  border: 2px solid #030509;
+  border: 2px solid #060606;
   box-shadow: 0 0 18px var(--c, #ef4444);
 }
 
@@ -204,9 +204,9 @@ html.senior {
   place-items: center;
   font-size: 14px;
   line-height: 1;
-  background: rgba(8, 11, 18, 0.88);
-  border: 2px solid var(--c, #34e2c6);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--c, #34e2c6) 22%, transparent), 0 6px 14px rgba(0, 0, 0, 0.5);
+  background: rgba(14, 13, 12, 0.88);
+  border: 2px solid var(--c, #6fbf5e);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--c, #6fbf5e) 22%, transparent), 0 6px 14px rgba(0, 0, 0, 0.5);
   cursor: pointer;
   transition: transform 0.2s var(--ease-spring);
 }
@@ -218,9 +218,9 @@ html.senior {
   width: 14px;
   height: 14px;
   border-radius: 999px;
-  background: var(--c, #38bdf8);
-  border: 2px solid #030509;
-  box-shadow: 0 0 10px var(--c, #38bdf8);
+  background: var(--c, #9dc06a);
+  border: 2px solid #060606;
+  box-shadow: 0 0 10px var(--c, #9dc06a);
   cursor: pointer;
   transition: transform 0.2s var(--ease-spring);
 }
@@ -229,7 +229,7 @@ html.senior {
 }
 .hm-community-pin.pending {
   background: transparent;
-  border: 2px dashed var(--c, #38bdf8);
+  border: 2px dashed var(--c, #9dc06a);
   box-shadow: none;
   opacity: 0.85;
 }
@@ -265,7 +265,7 @@ input[type="range"].hm-mini {
   appearance: none;
   height: 4px;
   border-radius: 999px;
-  background: #1a2130;
+  background: #272523;
   outline: none;
 }
 input[type="range"].hm-mini::-webkit-slider-thumb {
@@ -360,20 +360,20 @@ html.reduce-motion *::after {
   width: 18px;
   height: 18px;
   border-radius: 999px;
-  background: #4cc3ff;
-  border: 2.5px solid #eaf6ff;
-  box-shadow: 0 0 0 6px rgba(76, 195, 255, 0.22), 0 2px 10px rgba(0, 0, 0, 0.6);
+  background: #6fbf5e;
+  border: 2.5px solid #f2f4ee;
+  box-shadow: 0 0 0 6px rgba(157, 192, 106, 0.22), 0 2px 10px rgba(0, 0, 0, 0.6);
 }
 .hm-me[data-sim="1"] {
-  background: #34e2c6;
-  box-shadow: 0 0 0 6px rgba(52, 226, 198, 0.22), 0 2px 10px rgba(0, 0, 0, 0.6);
+  background: #a9b6a2;
+  box-shadow: 0 0 0 6px rgba(169, 182, 162, 0.22), 0 2px 10px rgba(0, 0, 0, 0.6);
 }
 .hm-me::after {
   content: "";
   position: absolute;
   inset: -6px;
   border-radius: 999px;
-  border: 1.5px solid rgba(76, 195, 255, 0.5);
+  border: 1.5px solid rgba(157, 192, 106, 0.5);
   animation: hm-me-ping 2.4s ease-out infinite;
 }
 @keyframes hm-me-ping {

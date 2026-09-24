@@ -15,6 +15,11 @@ import { HeatTwinLayer } from "./three/HeatTwinLayer";
 import { loadFields } from "./three/fields";
 import type { TreeRecord } from "./three/trees";
 
+// How much of the twin is built around the user's own starting point. Generous
+// enough that the first view is a real neighbourhood rather than a keyhole, and
+// nothing like the cost of drawing the whole Narhe-to-Swargate zone.
+const INITIAL_REVEAL_M = 900;
+
 const ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas";
 const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
 // The convex-hull shadow fills are gone: they over-covered non-convex footprints
@@ -32,7 +37,7 @@ const equityCache = new Map<string, Promise<EquityIndex>>();
 function pinEl(color: string, letter: string) {
   const d = document.createElement("div");
   d.className = "hm-pin";
-  d.innerHTML = `<svg width="34" height="44" viewBox="0 0 34 44"><defs><linearGradient id="g${letter}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${color}"/><stop offset="1" stop-color="${color}" stop-opacity=".75"/></linearGradient></defs><path d="M17 43s14-14.6 14-26A14 14 0 0 0 3 17c0 11.4 14 26 14 26z" fill="url(#g${letter})" stroke="rgba(3,5,9,.9)" stroke-width="2"/><circle cx="17" cy="17" r="7.5" fill="#030509"/><text x="17" y="21" text-anchor="middle" font-size="10.5" font-weight="800" fill="${color}" font-family="system-ui">${letter}</text></svg>`;
+  d.innerHTML = `<svg width="34" height="44" viewBox="0 0 34 44"><defs><linearGradient id="g${letter}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${color}"/><stop offset="1" stop-color="${color}" stop-opacity=".75"/></linearGradient></defs><path d="M17 43s14-14.6 14-26A14 14 0 0 0 3 17c0 11.4 14 26 14 26z" fill="url(#g${letter})" stroke="rgba(6,6,6,.9)" stroke-width="2"/><circle cx="17" cy="17" r="7.5" fill="#060606"/><text x="17" y="21" text-anchor="middle" font-size="10.5" font-weight="800" fill="${color}" font-family="system-ui">${letter}</text></svg>`;
   return d;
 }
 
@@ -55,25 +60,25 @@ function interventionPopupHtml(r: InterventionResult, units: "C" | "F") {
   const cooler = r.delta_c < 0;
   return `
     <div style="min-width:230px">
-      <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#9aa5b8;margin-bottom:6px">
+      <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#adaaa5;margin-bottom:6px">
         <span>${s.icon}</span><span>${esc(r.label)} · ${r.radius_m|0} m radius</span>
       </div>
       <div style="display:flex;align-items:center;gap:14px">
         <div>
-          <div style="font-size:9.5px;color:#6e7a90;letter-spacing:.06em;text-transform:uppercase">Before</div>
+          <div style="font-size:9.5px;color:#858179;letter-spacing:.06em;text-transform:uppercase">Before</div>
           <div style="font-size:22px;font-weight:700;letter-spacing:-.02em;color:${heatColor(r.before.feels_c)}">${fmtTemp(r.before.feels_c, units)}</div>
         </div>
-        <div style="color:#4a5468;font-size:16px">→</div>
+        <div style="color:#5d5a55;font-size:16px">→</div>
         <div>
-          <div style="font-size:9.5px;color:#6e7a90;letter-spacing:.06em;text-transform:uppercase">After</div>
+          <div style="font-size:9.5px;color:#858179;letter-spacing:.06em;text-transform:uppercase">After</div>
           <div style="font-size:22px;font-weight:700;letter-spacing:-.02em;color:${heatColor(r.after.feels_c)}">${fmtTemp(r.after.feels_c, units)}</div>
         </div>
         <div style="margin-left:auto;text-align:right">
-          <div style="font-size:9.5px;color:#6e7a90;letter-spacing:.06em;text-transform:uppercase">Change</div>
-          <div style="font-size:18px;font-weight:700;color:${cooler ? "#4cc3ff" : "#fb8a1f"}">${fmtDelta(r.delta_c, units)}</div>
+          <div style="font-size:9.5px;color:#858179;letter-spacing:.06em;text-transform:uppercase">Change</div>
+          <div style="font-size:18px;font-weight:700;color:${cooler ? "#9dc06a" : "#fb8a1f"}">${fmtDelta(r.delta_c, units)}</div>
         </div>
       </div>
-      <div style="font-size:11px;color:#7c8698;margin-top:8px;line-height:1.4">${esc(r.note)}</div>
+      <div style="font-size:11px;color:#908c84;margin-top:8px;line-height:1.4">${esc(r.note)}</div>
     </div>`;
 }
 
@@ -124,6 +129,7 @@ export default function TwinMap() {
   useEffect(() => {
     if (!el.current || !meta.data) return;
     const [s, w, n, e] = meta.data.zone.bbox;
+    const start = useMap.getState().startAt;
     const host = document.createElement("div");
     host.style.cssText = "position:absolute;inset:0";
     el.current.appendChild(host);
@@ -140,8 +146,14 @@ export default function TwinMap() {
           { id: "base", type: "raster", source: "base", paint: { "raster-saturation": -0.4, "raster-brightness-max": 0.8, "raster-contrast": 0.1 } },
         ],
       },
-      center: [(w + e) / 2 - 0.0015, (s + n) / 2 + 0.0008],
-      zoom: 15.4,
+      // Open on the user's own starting point, not the middle of the zone. The
+      // zone centre is Dhankawadi, which is nowhere in particular if you are in
+      // Narhe or Swargate, and opening there would show an empty basemap because
+      // nothing is revealed until the twin is built around where you actually are.
+      center: start
+        ? [start.lon, start.lat]
+        : [(w + e) / 2 - 0.0015, (s + n) / 2 + 0.0008],
+      zoom: start ? 16.4 : 15.4,
       minZoom: 13.5,
       maxZoom: 19.5,
       maxPitch: 72,
@@ -155,7 +167,7 @@ export default function TwinMap() {
 
     map.on("load", () => {
       map.addSource("water", { type: "geojson", data: EMPTY });
-      map.addLayer({ id: "water", type: "fill", source: "water", paint: { "fill-color": "#0b3350", "fill-opacity": 0.75, "fill-outline-color": "#2b7fb0" } });
+      map.addLayer({ id: "water", type: "fill", source: "water", paint: { "fill-color": "#16201f", "fill-opacity": 0.75, "fill-outline-color": "#3d4f4a" } });
       map.addLayer({ id: "labels", type: "raster", source: "labels", paint: { "raster-opacity": 0.75 } });
       map.addSource("equity", { type: "geojson", data: EMPTY });
       map.addLayer({
@@ -163,13 +175,13 @@ export default function TwinMap() {
         paint: {
           "fill-color": [
             "interpolate", ["linear"], ["get", "vulnerability"],
-            0, "rgba(30,41,59,0)", 25, "rgba(124,58,237,.28)", 50, "rgba(190,24,93,.42)", 75, "rgba(221,19,103,.6)", 100, "rgba(255,60,130,.72)",
+            0, "rgba(40,42,38,0)", 25, "rgba(178,166,82,.28)", 50, "rgba(232,162,56,.42)", 75, "rgba(241,108,44,.6)", 100, "rgba(223,52,44,.72)",
           ],
           "fill-opacity-transition": { duration: 400 },
         },
       });
       map.addSource("buildings", { type: "geojson", data: EMPTY });
-      map.addLayer({ id: "buildings-2d", type: "fill", source: "buildings", paint: { "fill-color": "#141a27", "fill-opacity": 0.92, "fill-outline-color": "#232c3e" } });
+      map.addLayer({ id: "buildings-2d", type: "fill", source: "buildings", paint: { "fill-color": "#1e1d1b", "fill-opacity": 0.92, "fill-outline-color": "#33312e" } });
       map.addSource("pois", { type: "geojson", data: EMPTY });
       map.addLayer({
         id: "pois", type: "circle", source: "pois", minzoom: 14.5,
@@ -177,7 +189,7 @@ export default function TwinMap() {
           "circle-color": ["get", "color"],
           "circle-radius": ["interpolate", ["linear"], ["zoom"], 15, ["case", ["get", "on"], 4.5, 1.8], 18, ["case", ["get", "on"], 8, 4]],
           "circle-opacity": ["case", ["get", "on"], 1, 0.55],
-          "circle-stroke-color": "#030509",
+          "circle-stroke-color": "#060606",
           "circle-stroke-width": ["case", ["get", "on"], 2, 0.5],
         },
       });
@@ -242,6 +254,19 @@ export default function TwinMap() {
         map.addLayer(layer, "labels");
         layerRef.current = layer;
         added = layer;
+
+        // Build the twin where the user actually is, and nowhere else.
+        //
+        // Onboarding resolves `startAt` before anyone reaches this screen, so there is
+        // always a real place to start from -- a position fix where the browser gave
+        // one, otherwise a start the user picked. Seeding from the map centre instead
+        // would put a circle of city in the middle of the zone regardless of where the
+        // user stands, which is exactly what this replaces. If startAt is somehow
+        // missing, nothing is revealed: "Use my location" and planning a trip are both
+        // still there, and an honest empty map beats a plausible wrong one.
+        const at = useMap.getState().startAt;
+        if (at) layer.addPositionFix(at.lat, at.lon, INITIAL_REVEAL_M);
+
         setLayerEpoch((n) => n + 1);
       })
       .catch(() => {});
@@ -299,6 +324,22 @@ export default function TwinMap() {
     layerRef.current?.setRevealEnabled(revealOn);
   }, [revealOn, layerEpoch]);
 
+  // ───────── reveal the corridor the trip actually goes through ─────────
+  // Planning a trip is the strongest statement a user makes about which part of the
+  // city they care about, so it is what loads the twin there: the selected route's
+  // band lights up with its buildings, canopy, road surface and heat, and the rest
+  // of the zone stays dark rather than rendering a whole city nobody asked to see.
+  // Reveal accumulates, so switching between alternatives adds their corridors
+  // instead of wiping the one already shown.
+  useEffect(() => {
+    const layer = layerRef.current;
+    if (!layer || !compare?.routes?.length) return;
+    const route = compare.routes.find((r) => r.id === selected) ?? compare.routes[0];
+    if (!route?.geometry?.length) return;
+    layer.revealRoute(route.geometry);
+    if (!useMap.getState().revealOn) useMap.getState().set({ revealOn: true });
+  }, [compare, selected, layerEpoch]);
+
   useEffect(() => {
     return () => {
       meMarker.current?.remove();
@@ -340,7 +381,7 @@ export default function TwinMap() {
     map.setLight({
       anchor: "map",
       position: [1.4, azimuthDeg, Math.min(88, Math.max(8, 90 - elevationDeg))],
-      color: elevationDeg > 0 ? "#fff1dc" : "#8aa4ff",
+      color: elevationDeg > 0 ? "#fff1dc" : "#c9c2b4",
       intensity: elevationDeg > 0 ? 0.5 : 0.18,
     });
     layerRef.current?.setSun({ elevationDeg, azimuthDeg, intensity });
@@ -374,7 +415,7 @@ export default function TwinMap() {
       spotMarkers.current.push(new maplibregl.Marker({ element: d }).setLngLat([spot.lon, spot.lat]).addTo(map));
     };
     mk(nearest.stats.hottest, "#ef4444", "Hottest street");
-    mk(nearest.stats.coolest, "#34e2c6", "Coolest street");
+    mk(nearest.stats.coolest, "#9dc06a", "Coolest street");
   }, [ready, mode, nearest, units]);
 
   // ───────── intervention simulator pins (SDG 13/15) ─────────
@@ -429,7 +470,7 @@ export default function TwinMap() {
     communityMarkersRef.current = [];
     if (!ready || !map) return;
     const addMarker = (lat: number, lon: number, kind: string, name: string, pending: boolean) => {
-      const color = POI_STYLE[kind as keyof typeof POI_STYLE]?.color ?? "#38bdf8";
+      const color = POI_STYLE[kind as keyof typeof POI_STYLE]?.color ?? "#9dc06a";
       const d = document.createElement("div");
       d.className = "hm-community-pin";
       d.style.setProperty("--c", color);
@@ -498,11 +539,11 @@ export default function TwinMap() {
         chipMarkers.current.set(r.id, m);
       }
       const d = m.getElement();
-      d.style.background = sel ? r.color : "rgba(8,11,18,.82)";
-      d.style.color = sel ? "#030509" : r.color;
+      d.style.background = sel ? r.color : "rgba(14,13,12,.82)";
+      d.style.color = sel ? "#060606" : r.color;
       d.style.border = `1px solid ${r.color}${sel ? "" : "80"}`;
       d.style.zIndex = sel ? "5" : "1";
-      d.innerHTML = `${r.label.replace("Route ", "")} <span style="opacity:.55;margin:0 2px">·</span> <span style="color:${sel ? "#030509" : riskColor(score)}">${Math.round(score)}</span>`;
+      d.innerHTML = `${r.label.replace("Route ", "")} <span style="opacity:.55;margin:0 2px">·</span> <span style="color:${sel ? "#060606" : riskColor(score)}">${Math.round(score)}</span>`;
     }
     chipMarkers.current.forEach((m, id) => {
       if (!seen.has(id)) {
@@ -545,7 +586,7 @@ export default function TwinMap() {
       });
       odMarkers.current.push(m);
     };
-    add("origin", origin, "#34e2c6", "A");
+    add("origin", origin, "#d8c65a", "A");
     add("destination", destination, "#f472b6", "B");
   }, [ready, origin, destination]);
 
@@ -600,15 +641,15 @@ export default function TwinMap() {
         const s = await api.point({ lat: ev.lngLat.lat, lon: ev.lngLat.lng, scenario: SCENARIO, time: base, offset_min: off, temp_delta: st.tempDelta });
         const u = p.units;
         const sun = s.sun_exposure < 0.35 ? "In shade" : s.sun_exposure < 0.7 ? "Partial shade" : "Full sun";
-        const row = (k: string, v: string) => `<div><div style="color:#6e7a90;font-size:10px;letter-spacing:.06em;text-transform:uppercase">${k}</div><div style="font-weight:600">${v}</div></div>`;
+        const row = (k: string, v: string) => `<div><div style="color:#858179;font-size:10px;letter-spacing:.06em;text-transform:uppercase">${k}</div><div style="font-weight:600">${v}</div></div>`;
         popup.setHTML(`
           <div style="min-width:230px">
-            <div style="font-size:11px;color:#9aa5b8;margin-bottom:4px">${esc(s.near)}</div>
+            <div style="font-size:11px;color:#adaaa5;margin-bottom:4px">${esc(s.near)}</div>
             <div style="display:flex;align-items:baseline;gap:8px">
               <span style="font-size:34px;font-weight:700;letter-spacing:-.03em;color:${heatColor(s.feels_c)};font-variant-numeric:tabular-nums">${fmtTemp(s.feels_c, u)}</span>
-              <span style="font-size:12px;color:#c7cfdc">${heatLabel(s.feels_c)}</span>
+              <span style="font-size:12px;color:#d4d2cf">${heatLabel(s.feels_c)}</span>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;margin-top:10px;font-size:12.5px;color:#eef2f7">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;margin-top:10px;font-size:12.5px;color:#f3f3f2">
               ${row("Air", fmtTemp(s.air_c, u))}${row("Ground", fmtTemp(s.surface_c, u))}
               ${row("Sun", sun)}${row("Surface", esc(s.surface))}
             </div>
@@ -644,7 +685,7 @@ export default function TwinMap() {
         </div>
       )}
       {/* soft vignette so floating glass reads over the map */}
-      <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(120% 90% at 50% 40%, transparent 55%, rgba(3,5,9,.55) 100%)" }} />
+      <div className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(120% 90% at 50% 40%, transparent 55%, rgba(6,6,6,.55) 100%)" }} />
     </div>
   );
 }

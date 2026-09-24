@@ -51,10 +51,10 @@ function Toggle({ on, onChange, label, hint }: { on: boolean; onChange: (v: bool
         <span className="block text-[14px] text-ink-100">{label}</span>
         <span className="block text-[12px] text-ink-400">{hint}</span>
       </span>
-      <span className="w-12 h-7 rounded-full p-0.5 transition-colors duration-300" style={{ backgroundColor: on ? "#eef2f7" : "rgba(255,255,255,.1)" }}>
+      <span className="w-12 h-7 rounded-full p-0.5 transition-colors duration-300" style={{ backgroundColor: on ? "#f3f3f2" : "rgba(255,255,255,.1)" }}>
         <span
           className="block w-6 h-6 rounded-full shadow transition-transform duration-300 [transition-timing-function:cubic-bezier(.34,1.4,.64,1)]"
-          style={{ transform: on ? "translateX(20px)" : "none", backgroundColor: on ? "#030509" : "#fff" }}
+          style={{ transform: on ? "translateX(20px)" : "none", backgroundColor: on ? "#060606" : "#fff" }}
         />
       </span>
     </button>

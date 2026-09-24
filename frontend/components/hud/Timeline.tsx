@@ -50,7 +50,7 @@ export default function Timeline({ compact = false }: { compact?: boolean }) {
   const shown = live ? now : new Date(base).getTime() + timeMin * 60000;
   const { hm, ap } = parts(shown);
   const pct = (timeMin / TIMELINE_MAX) * 100;
-  const ribbon = frames.map((f, i) => `${f ? heatColor(f.stats.street_mean_c) : "#1a2130"} ${(TIMELINE[i] / TIMELINE_MAX) * 100}%`).join(", ");
+  const ribbon = frames.map((f, i) => `${f ? heatColor(f.stats.street_mean_c) : "#272523"} ${(TIMELINE[i] / TIMELINE_MAX) * 100}%`).join(", ");
   const toggle = () => {
     if (!playing && timeMin >= TIMELINE_MAX - 1) set({ timeMin: 0 });
     setPlaying((p) => !p);
@@ -103,7 +103,7 @@ export default function Timeline({ compact = false }: { compact?: boolean }) {
       <button
         onClick={toggle}
         className={`press grid place-items-center rounded-full text-ink-950 shrink-0 ${compact ? "w-10 h-10" : "w-12 h-12"}`}
-        style={{ background: "var(--cool-gradient)", boxShadow: "0 8px 24px -6px rgba(52,226,198,.6)" }}
+        style={{ background: "var(--cool-gradient)", boxShadow: "0 8px 24px -6px rgba(111,191,94,.6)" }}
         aria-label={playing ? "Pause" : "Play the next 3 hours"}
       >
         {playing ? <Pause size={compact ? 15 : 18} fill="currentColor" /> : <Play size={compact ? 15 : 18} fill="currentColor" className="ml-0.5" />}

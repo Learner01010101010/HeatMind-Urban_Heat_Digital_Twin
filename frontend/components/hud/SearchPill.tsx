@@ -84,7 +84,7 @@ export default function SearchPill() {
               {(["origin", "destination"] as const).map((f) => {
                 const val = f === "origin" ? origin : destination;
                 const on = field === f;
-                const dot = f === "origin" ? "#34e2c6" : "#f472b6";
+                const dot = f === "origin" ? "#6fbf5e" : "#f472b6";
                 return (
                   <div
                     key={f}

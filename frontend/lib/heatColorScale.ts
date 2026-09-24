@@ -1,14 +1,27 @@
 // One heat scale used everywhere — twin, routes, charts and passport (PRD §8).
 // Values are pedestrian feels-like °C.
 
+// A thermal ramp, deliberately with no blue anywhere in it.
+//
+// Two things were wrong with the blue -> teal -> green version. The scale floor sat
+// at 28°C while the twin encodes from 20°C, so every cell below 28 clamped to the
+// same saturated blue: a 23°C night rendered the whole city as one flat colour with
+// no structure at all. And green in the middle read as "safe" at 42°C, which NOAA
+// calls danger. Stops now start at the encoding floor and are pinned to the
+// heatLabel() boundaries, so colour and wording change at the same temperature.
+//
+// Luminance climbs from the cool end up to amber; past that, hue and chroma carry
+// the signal, because any saturated red is intrinsically dark (green is 71% of
+// luma). The top stop is deliberately kept off true oxblood so the worst cells
+// still read against a near-black basemap instead of sinking into it.
 export const HEAT_STOPS: [number, [number, number, number]][] = [
-  [28, [29, 78, 216]], // deep blue — comfortable
-  [35, [14, 165, 183]], // teal — caution
-  [42, [34, 197, 94]], // green — shaded, but already NOAA "danger"
-  [46.5, [250, 204, 21]], // yellow
-  [50, [249, 115, 22]], // orange
-  [53, [220, 38, 38]], // red — extreme danger (NOAA ≥ 52°C)
-  [56, [127, 29, 29]], // deep red
+  [20, [74, 80, 72]], // cool — near-neutral, sits back into the basemap
+  [27, [114, 126, 86]], // comfortable ceiling — muted olive
+  [32, [178, 166, 82]], // caution — olive gold
+  [39, [232, 162, 56]], // extreme caution — amber
+  [45, [241, 108, 44]], // orange
+  [52, [223, 52, 44]], // danger -> extreme danger — red
+  [56, [186, 30, 50]], // off the top of the scale — deep crimson
 ];
 
 export const SCALE_MIN = HEAT_STOPS[0][0];
@@ -46,10 +59,10 @@ export const TWIN_LUT: Uint8ClampedArray = (() => {
 })();
 
 export const RISK_BANDS = [
-  { max: 25, label: "Low", color: "#2dd4bf" },
-  { max: 45, label: "Moderate", color: "#facc15" },
-  { max: 65, label: "High", color: "#f97316" },
-  { max: 101, label: "Extreme", color: "#ef4444" },
+  { max: 25, label: "Low", color: "#8fa055" },
+  { max: 45, label: "Moderate", color: "#e8b93c" },
+  { max: 65, label: "High", color: "#f16c2c" },
+  { max: 101, label: "Extreme", color: "#df342c" },
 ];
 
 export function riskColor(score: number): string {

@@ -115,7 +115,7 @@ export default function RoutePanel({ route }: { route: Route }) {
           { l: "Peak feels-like", v: <AnimatedNumber value={conv(peak)} suffix="°" />, c: heatColor(peak) },
           { l: "Shade coverage", v: <AnimatedNumber value={shade} suffix="%" />, c: "#6ff0da" },
           { l: "In danger heat", v: `${Math.round(route.metrics.minutes_danger)} min`, c: "#fca5a5" },
-          { l: "Water & cooling", v: `${water} stops`, c: "#4cc3ff" },
+          { l: "Water & cooling", v: `${water} stops`, c: "#9dc06a" },
         ].map((x) => (
           <div key={x.l} className="rounded-[22px] bg-white/[0.035] px-4 py-3.5">
             <div className="text-[11.5px] text-ink-400">{x.l}</div>
@@ -236,7 +236,7 @@ export default function RoutePanel({ route }: { route: Route }) {
         onClick={log}
         disabled={logState === "busy" || logState === "done"}
         className="press w-full h-14 rounded-full font-semibold text-[15px] text-ink-950 flex items-center justify-center gap-2 disabled:opacity-90"
-        style={{ background: "var(--cool-gradient)", boxShadow: "0 16px 40px -14px rgba(52,226,198,.7)" }}
+        style={{ background: "var(--cool-gradient)", boxShadow: "0 16px 40px -14px rgba(111,191,94,.7)" }}
       >
         {logState === "busy" ? <Loader2 size={18} className="animate-spin" /> : logState === "done" ? <Check size={18} /> : <Footprints size={18} />}
         {logState === "done" ? "Added to your Heat Passport" : logState === "error" ? "Couldn't log — retry" : "Start trip & log to Passport"}

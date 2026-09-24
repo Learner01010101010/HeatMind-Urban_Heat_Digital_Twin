@@ -16,7 +16,7 @@ function budgetColor(pct: number) {
   if (pct >= 100) return "#ef4444";
   if (pct >= 75) return "#fb8a1f";
   if (pct >= 50) return "#facc15";
-  return "#34e2c6";
+  return "#6fbf5e";
 }
 
 function Heading({ children, aside }: { children: React.ReactNode; aside?: React.ReactNode }) {
@@ -219,11 +219,11 @@ export default function PassportPage() {
 
             {rest && rest.minutes_exposed > 0 && (
               <section className="glass rounded-2xl p-4 flex items-start gap-3">
-                <Package size={18} className="mt-0.5 shrink-0" style={{ color: rest.compliant ? "#34e2c6" : "#fb8a1f" }} />
+                <Package size={18} className="mt-0.5 shrink-0" style={{ color: rest.compliant ? "#6fbf5e" : "#fb8a1f" }} />
                 <div className="flex-1">
                   <div className="flex items-baseline justify-between gap-3">
                     <h3 className="text-[15px] font-semibold">Rest breaks</h3>
-                    <span className="text-[14px] font-semibold tabular" style={{ color: rest.compliant ? "#34e2c6" : "#fb8a1f" }}>
+                    <span className="text-[14px] font-semibold tabular" style={{ color: rest.compliant ? "#6fbf5e" : "#fb8a1f" }}>
                       {rest.breaks_taken} of {rest.breaks_required}
                     </span>
                   </div>

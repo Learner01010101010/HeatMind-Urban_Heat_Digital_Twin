@@ -148,7 +148,7 @@ void main() {
     float frameX = smoothstep(0.0, 0.035, abs(fx - 0.5) - halfWin + 0.035);
     float frame = win * (1.0 - frameX);
 
-    vec3 glass = vec3(0.055, 0.075, 0.105);
+    vec3 glass = vec3(0.088, 0.082, 0.072);
     albedo = mix(albedo, glass, win * 0.92);
     albedo = mix(albedo, vec3(0.02), frame * 0.5);
     glassMask = win;
@@ -173,7 +173,7 @@ void main() {
   float direct = ndl * uSunIntensity * (1.0 - 0.85 * occl);
 
   float ambient = mix(0.22, 0.52, pow(clamp(svf, 0.0, 1.0), 1.6));
-  vec3 skyTint = mix(vec3(0.18, 0.22, 0.34), vec3(0.42, 0.47, 0.58), ambient);
+  vec3 skyTint = mix(vec3(0.25, 0.24, 0.22), vec3(0.57, 0.55, 0.51), ambient);
 
   vec3 col = albedo * (skyTint * ambient + uSunColor * direct);
 
@@ -184,7 +184,14 @@ void main() {
   float lit = step(0.5, uNight) * glassMask * step(0.42, litSeed);
   col += vec3(1.0, 0.82, 0.52) * lit * 0.5;
 
-  col *= mix(0.06, 1.0, revealAt(uv));
+  // Outside the revealed corridor this geometry is not drawn at all. Dimming it
+  // instead (which is what the old 0.05 multiplier did) still rasterises opaque
+  // black over the basemap, so undiscovered ground came out as a dark silhouette
+  // of the city rather than as undiscovered ground. revealAt() returns 1.0 when
+  // reveal is switched off, so the whole-zone view is untouched by this.
+  float rv = revealAt(uv);
+  if (rv < 0.15) discard;
+  col *= mix(0.55, 1.0, rv);
 
   gl_FragColor = vec4(col, 1.0);
 }`;

@@ -229,6 +229,19 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     if (this.reveal.addFix(lat, lon, radiusM)) this.map?.triggerRepaint();
   }
 
+  /**
+   * Reveal the corridor along a planned route, as [lat, lon] pairs.
+   *
+   * This is what makes a cross-city trip affordable to draw: the geometry for the
+   * whole zone is already uploaded, but only the band the route actually passes
+   * through is shaded in, so buildings, canopy, road surface and the heat plane
+   * all appear together along the way rather than the whole city rendering at once.
+   */
+  revealRoute(coords: [number, number][], radiusM?: number) {
+    if (!this.reveal) return;
+    if (this.reveal.addPath(coords, radiusM)) this.map?.triggerRepaint();
+  }
+
   /** Turn progressive reveal on or off across every layer at once. */
   setRevealEnabled(on: boolean) {
     this.revealOn = on;

@@ -17,7 +17,7 @@ async def compare(req: CompareRequest):
     breakdowns, explanations, POIs along the route and a 0–120 min departure forecast."""
     for p in (req.origin, req.destination):
         if not geo.in_bbox(p.lat, p.lon, 0.002):
-            raise HTTPException(422, "Point is outside the digital-twin zone (TSSM campus, Narhe, Pune).")
+            raise HTTPException(422, "Point is outside the digital-twin zone (Narhe to Swargate, Pune).")
     depart = resolve_time(req.scenario, req.depart_at, req.depart_offset_min)
     try:
         return await run_in_threadpool(

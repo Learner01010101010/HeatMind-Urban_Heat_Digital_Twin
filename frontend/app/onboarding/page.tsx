@@ -1,13 +1,30 @@
 "use client";
 
-import { ArrowRight, Loader2, ShieldCheck, Sun, TreePine } from "lucide-react";
+import { AlertTriangle, ArrowRight, Check, Crosshair, Loader2, MapPin, ShieldCheck, Sun, TreePine } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Logo from "@/components/shell/Logo";
 import AuroraBackground from "@/components/ui/AuroraBackground";
 import PersonaSelector from "@/components/ui/PersonaSelector";
-import { ensureUser } from "@/lib/hooks";
-import { usePrefs } from "@/lib/store";
+import { startWatch, stopWatch, useGeo } from "@/lib/geolocation";
+import { ensureUser, useMeta } from "@/lib/hooks";
+import { useMap, usePrefs } from "@/lib/store";
+
+/**
+ * Fallback starts, for when the browser will not give a position or the user is
+ * standing outside the modelled corridor.
+ *
+ * Hard-coded because the alternative is worse: the named places live in the zone
+ * payload, and that is 16 MB — nothing worth pulling into an onboarding screen to
+ * populate three buttons. /api/meta only carries the bbox and a centre point, and
+ * "start at 18.468, 73.841" is not a choice anyone can make. These three are the
+ * ends and middle of the corridor and are checked against the zone's own places.
+ */
+const ANCHORS: { lat: number; lon: number; label: string; hint: string }[] = [
+  { lat: 18.4427, lon: 73.8318, label: "Narhe", hint: "TSSM BSCOER campus" },
+  { lat: 18.4537, lon: 73.8563, label: "Katraj", hint: "near Bharati Vidyapeeth" },
+  { lat: 18.5007, lon: 73.8586, label: "Swargate", hint: "north end of the zone" },
+];
 
 export default function Onboarding() {
   const router = useRouter();
@@ -18,7 +35,41 @@ export default function Onboarding() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  const meta = useMeta();
+  const bbox = meta.data?.zone.bbox;
+  const geoStatus = useGeo((s) => s.status);
+  const geoLat = useGeo((s) => s.lat);
+  const geoLon = useGeo((s) => s.lon);
+  const geoError = useGeo((s) => s.error);
+  const [picked, setPicked] = useState<{ lat: number; lon: number; label: string } | null>(null);
+
+  // The twin is built around wherever this resolves to, and nothing is rendered
+  // until it does — hence asking before letting anyone in, rather than after.
+  const startAt =
+    picked ??
+    (geoStatus === "inside" && geoLat !== null && geoLon !== null
+      ? { lat: geoLat, lon: geoLon, label: "My location" }
+      : null);
+
+  // Ask as soon as there is a bbox to test the fix against. One shot: a declined
+  // prompt is a decision, not something to nag about, and the anchors below are a
+  // complete answer on their own.
+  const asked = useRef(false);
+  useEffect(() => {
+    if (!bbox || asked.current) return;
+    asked.current = true;
+    startWatch(bbox);
+  }, [bbox]);
+
+  const pickAnchor = (a: (typeof ANCHORS)[number]) => {
+    // Stop following a position that is outside the zone: left running it would
+    // keep overwriting the trip origin with a point no route can start from.
+    stopWatch();
+    setPicked({ lat: a.lat, lon: a.lon, label: a.label });
+  };
+
   const start = async () => {
+    if (!startAt) return;
     setBusy(true);
     setErr(null);
     try {
@@ -26,6 +77,7 @@ export default function Onboarding() {
     } catch {
       setErr("Couldn't reach the HeatMind engine — you can still explore, but the Passport needs the backend on :8000.");
     }
+    useMap.getState().set({ startAt, revealOn: true });
     set({ onboarded: true });
     router.push("/");
   };
@@ -36,7 +88,7 @@ export default function Onboarding() {
       <div className="relative z-10 max-w-5xl mx-auto px-5 py-10 md:py-16 grid md:grid-cols-[1fr_1.15fr] gap-10 items-start">
         <section
           className="relative rounded-[40px] p-6 md:p-8 -m-6 md:-m-8"
-          style={{ background: "radial-gradient(closest-side, rgba(3,5,9,0.55), rgba(3,5,9,0.22) 65%, transparent 100%)" }}
+          style={{ background: "radial-gradient(closest-side, rgba(6,6,6,0.55), rgba(6,6,6,0.22) 65%, transparent 100%)" }}
         >
           <div className="flex items-center gap-3 mb-8">
             <Logo size={40} />
@@ -49,7 +101,7 @@ export default function Onboarding() {
             The same street can be 10°C hotter than the one next to it.
           </h1>
           <p className="text-ink-400 mt-5 text-[15px] leading-relaxed max-w-md">
-            Weather apps give one number for the whole city. HeatMind models heat street by street across the TSSM BSCOER campus in Narhe, Pune, forecasts it three hours ahead, and routes you through the shade.
+            Weather apps give one number for the whole city. HeatMind models heat street by street across south Pune — Narhe, Katraj, Bharati Vidyapeeth and up to Swargate — forecasts it three hours ahead, and routes you through the shade.
           </p>
           <ul className="mt-7 space-y-3 text-[14px] text-ink-200">
             <li className="flex gap-3">
@@ -89,14 +141,79 @@ export default function Onboarding() {
             </label>
           </div>
 
+          <div className="mt-3 rounded-2xl bg-white/[0.03] border border-white/[0.07] p-3">
+            <div className="flex items-center gap-2 text-[12px] font-bold text-ink-300 mb-1">
+              <MapPin size={13} /> Where are you starting?
+            </div>
+            <p className="text-[11.5px] text-ink-400 leading-relaxed mb-3">
+              The twin is built in 3D around you, street by street — so it needs a starting point to know which part of south Pune to raise.
+            </p>
+
+            {geoStatus === "locating" && (
+              <div className="flex items-center gap-2 text-[13px] text-ink-300">
+                <Loader2 size={14} className="animate-spin" /> Finding you…
+              </div>
+            )}
+
+            {startAt && (
+              <div className="flex items-center gap-2 text-[13px] font-semibold text-ink-100">
+                <Check size={14} className="text-[#6fbf5e]" />
+                Starting at {startAt.label}
+                {picked && (
+                  <button onClick={() => setPicked(null)} className="ml-auto text-[11.5px] font-medium text-ink-400 hover:text-ink-200 underline">
+                    change
+                  </button>
+                )}
+              </div>
+            )}
+
+            {!startAt && geoStatus !== "locating" && (
+              <>
+                {geoStatus === "outside" && (
+                  <p className="flex items-start gap-2 text-[12px] text-ink-300 mb-3">
+                    <AlertTriangle size={13} className="shrink-0 mt-0.5 text-[#e8a238]" />
+                    Found you, but you&apos;re outside the modelled corridor. Pick a start inside it:
+                  </p>
+                )}
+                {(geoStatus === "denied" || geoStatus === "unavailable") && (
+                  <p className="flex items-start gap-2 text-[12px] text-ink-300 mb-3">
+                    <AlertTriangle size={13} className="shrink-0 mt-0.5 text-[#e8a238]" />
+                    {geoError ?? "No position available."} Pick a start instead:
+                  </p>
+                )}
+                <div className="grid gap-1.5">
+                  {ANCHORS.map((a) => (
+                    <button
+                      key={a.label}
+                      onClick={() => pickAnchor(a)}
+                      className="flex items-center gap-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] px-3 py-2 text-left transition"
+                    >
+                      <MapPin size={13} className="text-ink-400 shrink-0" />
+                      <span className="text-[13px] font-semibold text-ink-100">{a.label}</span>
+                      <span className="text-[11.5px] text-ink-400">{a.hint}</span>
+                    </button>
+                  ))}
+                </div>
+                {(geoStatus === "denied" || geoStatus === "unavailable" || geoStatus === "idle") && bbox && (
+                  <button
+                    onClick={() => startWatch(bbox)}
+                    className="mt-2 flex items-center gap-1.5 text-[12px] font-semibold text-ink-300 hover:text-ink-100 transition"
+                  >
+                    <Crosshair size={12} /> Try my location again
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+
           {err && <p className="text-[12.5px] text-ink-300 mt-3">{err}</p>}
           <button
             onClick={start}
-            disabled={busy}
-            className="mt-5 w-full flex items-center justify-center gap-2 rounded-full bg-ink-100 hover:bg-white text-ink-950 font-semibold py-3.5 text-[15px] transition disabled:opacity-60"
+            disabled={busy || !startAt}
+            className="mt-4 w-full flex items-center justify-center gap-2 rounded-full bg-ink-100 hover:bg-white text-ink-950 font-semibold py-3.5 text-[15px] transition disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {busy ? <Loader2 size={18} className="animate-spin" /> : null}
-            Enter the heat twin <ArrowRight size={18} />
+            {startAt ? "Enter the heat twin" : "Choose a starting point"} <ArrowRight size={18} />
           </button>
         </section>
       </div>

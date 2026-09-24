@@ -96,7 +96,7 @@ export default function InterventionPanel({ compact = false }: { compact?: boole
                       <div key={i} className="flex items-center gap-2 text-[11.5px] text-ink-300">
                         <span>{s.icon}</span>
                         <span className="flex-1 truncate">{s.short}</span>
-                        <span className="font-semibold tabular" style={{ color: r.delta_c < 0 ? "#4cc3ff" : "#fb8a1f" }}>
+                        <span className="font-semibold tabular" style={{ color: r.delta_c < 0 ? "#9dc06a" : "#fb8a1f" }}>
                           {fmtDelta(r.delta_c, units)}
                         </span>
                       </div>

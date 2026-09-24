@@ -10,10 +10,10 @@ import { usePrefs } from "@/lib/store";
  * and smooth even with five large blurred layers running at once.
  */
 const BLOBS = [
-  { color: "99,102,241", size: 620, baseX: 22, baseY: 28, speed: 0.00016, phase: 0, orbit: 70, followMouse: 0.16 }, // indigo
-  { color: "168,85,247", size: 560, baseX: 78, baseY: 22, speed: 0.00021, phase: 2.1, orbit: 60, followMouse: 0.11 }, // violet
+  { color: "232,162,56", size: 620, baseX: 22, baseY: 28, speed: 0.00016, phase: 0, orbit: 70, followMouse: 0.16 }, // amber
+  { color: "241,108,44", size: 560, baseX: 78, baseY: 22, speed: 0.00021, phase: 2.1, orbit: 60, followMouse: 0.11 }, // orange
   { color: "236,72,153", size: 520, baseX: 66, baseY: 74, speed: 0.00014, phase: 4.2, orbit: 65, followMouse: 0.09 }, // magenta
-  { color: "45,212,191", size: 580, baseX: 20, baseY: 78, speed: 0.00019, phase: 1.4, orbit: 55, followMouse: 0.13 }, // teal
+  { color: "178,166,82", size: 580, baseX: 20, baseY: 78, speed: 0.00019, phase: 1.4, orbit: 55, followMouse: 0.13 }, // olive gold
   { color: "34,197,94", size: 420, baseX: 48, baseY: 14, speed: 0.00024, phase: 3.3, orbit: 50, followMouse: 0.07 }, // green
 ] as const;
 
@@ -94,7 +94,7 @@ export default function AuroraBackground() {
       {/* Soft grain-free vignette so the far edges settle back to near-black, matching the rest of the site. */}
       <div
         className="absolute inset-0"
-        style={{ background: "radial-gradient(ellipse 90% 80% at 50% 45%, transparent 40%, rgba(3,5,9,0.7) 100%)" }}
+        style={{ background: "radial-gradient(ellipse 90% 80% at 50% 45%, transparent 40%, rgba(6,6,6,0.7) 100%)" }}
       />
     </div>
   );

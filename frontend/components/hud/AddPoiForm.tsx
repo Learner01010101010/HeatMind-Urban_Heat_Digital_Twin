@@ -7,9 +7,9 @@ import type { CommunityPoiKind } from "@/lib/api";
 import { useMap } from "@/lib/store";
 
 const KINDS: { id: CommunityPoiKind; label: string; icon: React.ElementType; color: string }[] = [
-  { id: "water", label: "Water", icon: Droplets, color: "#38bdf8" },
-  { id: "rest", label: "Rest", icon: Umbrella, color: "#a78bfa" },
-  { id: "shade", label: "Shade", icon: TreePine, color: "#2dd4bf" },
+  { id: "water", label: "Water", icon: Droplets, color: "#5ec98a" },
+  { id: "rest", label: "Rest", icon: Umbrella, color: "#d8b45e" },
+  { id: "shade", label: "Shade", icon: TreePine, color: "#a9b6a2" },
 ];
 
 /** SDG 6 — floating form for the point the user just tapped on the map. */

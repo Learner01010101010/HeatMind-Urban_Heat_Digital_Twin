@@ -92,12 +92,16 @@ def build_zone() -> dict[str, Any]:
     places: list[dict] = []
     seen_places: set[str] = set()
 
-    def add_place(name: str, kind: str, lat: float, lon: float) -> None:
+    def add_place(name: str, kind: str, lat: float, lon: float, featured: bool = False) -> None:
         key = name.strip().lower()
         if not name or key in seen_places or not geo.in_bbox(lat, lon):
             return
         seen_places.add(key)
-        places.append({"id": f"pl{len(places)}", "name": name.strip(), "kind": kind, "lat": round(lat, 6), "lon": round(lon, 6)})
+        rec = {"id": f"pl{len(places)}", "name": name.strip(), "kind": kind,
+               "lat": round(lat, 6), "lon": round(lon, 6)}
+        if featured:
+            rec["featured"] = True
+        places.append(rec)
 
     pad = 0.0004
     for e in els:
@@ -206,6 +210,13 @@ def build_zone() -> dict[str, Any]:
             _amenity_poi(pois, t, lat, lon)
             if t.get("name") and t.get("amenity"):
                 add_place(t["name"], t["amenity"], lat, lon)
+        # Neighbourhood names. Without these the search box knows shops and colleges
+        # but not "Swargate" or "Katraj", so the one destination a Pune user is most
+        # likely to type is the one they cannot pick. Settlement-level names are
+        # featured so they head the list when the box is empty.
+        if t.get("place") and t.get("name"):
+            add_place(t["name"], f"place:{t['place']}", lat, lon,
+                      featured=t["place"] in _FEATURED_PLACE_KINDS)
 
     _synthesise_canopy(trees, roads, surfaces, buildings, rng)
     _seed_pois(pois, roads, surfaces, places, rng)
@@ -242,6 +253,11 @@ def build_zone() -> dict[str, Any]:
     }
     ZONE_FILE.write_text(json.dumps(zone, separators=(",", ":")), encoding="utf8")
     return zone
+
+
+# place=* values worth surfacing as destinations. Smaller values (isolated_dwelling,
+# farm, locality) are kept as searchable places but not promoted.
+_FEATURED_PLACE_KINDS = frozenset({"city", "town", "suburb", "neighbourhood", "village"})
 
 
 def _amenity_poi(pois: list, t: dict, lat: float, lon: float) -> None:

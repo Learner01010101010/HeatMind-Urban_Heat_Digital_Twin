@@ -16,7 +16,7 @@ import { useMap } from "@/lib/store";
 /**
  * "Start from where I am", and progressive reveal as the user moves.
  *
- * The twin only covers ~4 km² around the BSCOER campus, so a real fix from anywhere
+ * The twin covers the Narhe-to-Swargate corridor, so a real fix from anywhere
  * else is a legitimate outcome that has to be said out loud rather than swallowed —
  * hence the explicit `outside` state and the offer to walk the campus instead.
  */
@@ -115,7 +115,7 @@ export default function MyLocation({ compact = false }: { compact?: boolean }) {
                 style={{ background: "rgba(251,138,31,.12)", color: "#ffc48a" }}
               >
                 You are outside the modelled zone, so there is no twin data where you are standing.
-                HeatMind only covers ~4 km² around TSSM BSCOER, Narhe.
+                HeatMind covers south Pune, from Narhe up to Swargate.
                 {centre && (
                   <button
                     onClick={() => set({ flyTo: { lat: centre[0], lon: centre[1], zoom: 16, nonce: Date.now() } })}
@@ -176,7 +176,7 @@ export default function MyLocation({ compact = false }: { compact?: boolean }) {
         aria-expanded={open}
         style={
           live
-            ? { background: "linear-gradient(135deg, rgba(52,226,198,.95), rgba(76,195,255,.9))", color: "#04140f" }
+            ? { background: "linear-gradient(135deg, rgba(111,191,94,.95), rgba(157,192,106,.9))", color: "#04140f" }
             : undefined
         }
       >

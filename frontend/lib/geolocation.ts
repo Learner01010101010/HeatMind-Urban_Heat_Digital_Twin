@@ -5,10 +5,11 @@ import { create } from "zustand";
 /**
  * Where the user is, and whether the twin can say anything about it.
  *
- * The twin only models ~4 km² around the BSCOER campus, so "use my location" has a
- * real failure mode that is not an error: standing outside the zone. That is treated
- * as a first-class state (`outside`) rather than a rejected promise, because the
- * honest response is to say so and offer the campus, not to silently show nothing.
+ * The twin models the south-Pune corridor from Narhe to Swargate, not the whole
+ * city, so "use my location" has a real failure mode that is not an error:
+ * standing outside the zone. That is treated as a first-class state (`outside`)
+ * rather than a rejected promise, because the honest response is to say so and
+ * offer a point inside the corridor, not to silently show nothing.
  *
  * A simulated walker is included for the same reason the demo needs one: geolocation
  * needs HTTPS and a granted permission, neither of which holds when the app is being

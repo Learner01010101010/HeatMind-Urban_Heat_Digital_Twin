@@ -15,14 +15,14 @@ export function InsightChip({ compact = false }: { compact?: boolean }) {
   if (compact) {
     return (
       <button onClick={() => set({ panel: "insight" })} className="press glass relative grid place-items-center w-11 h-11 rounded-full" aria-label="Heat insights">
-        <span className="absolute inset-[5px] rounded-full" style={{ background: f ? `conic-gradient(from 200deg, ${heatColor(f.stats.street_min_c)}, ${heatColor(f.stats.street_max_c)}, ${heatColor(f.stats.street_min_c)})` : "#1a2130" }} />
+        <span className="absolute inset-[5px] rounded-full" style={{ background: f ? `conic-gradient(from 200deg, ${heatColor(f.stats.street_min_c)}, ${heatColor(f.stats.street_max_c)}, ${heatColor(f.stats.street_min_c)})` : "#272523" }} />
         <span className="relative grid place-items-center w-7 h-7 rounded-full bg-ink-900 text-[10.5px] font-semibold tabular text-ink-100">{f ? Math.round(conv(f.stats.street_max_c)) : "–"}°</span>
       </button>
     );
   }
   return (
     <button onClick={() => set({ panel: "insight" })} className="press glass flex items-center gap-3 h-12 pl-2 pr-3.5 rounded-full text-left" aria-label="Heat insights">
-      <span className="relative grid place-items-center w-8 h-8 rounded-full" style={{ background: f ? `conic-gradient(from 200deg, ${heatColor(f.stats.street_min_c)}, ${heatColor(f.stats.street_max_c)}, ${heatColor(f.stats.street_min_c)})` : "#1a2130" }}>
+      <span className="relative grid place-items-center w-8 h-8 rounded-full" style={{ background: f ? `conic-gradient(from 200deg, ${heatColor(f.stats.street_min_c)}, ${heatColor(f.stats.street_max_c)}, ${heatColor(f.stats.street_min_c)})` : "#272523" }}>
         <span className="w-5 h-5 rounded-full bg-ink-900" />
       </span>
       {f ? (
@@ -89,7 +89,7 @@ export function InsightPanel() {
               <span className="text-ink-500">–</span>
               <span style={{ color: heatColor(s.street_max_c) }}>{Math.round(units === "F" ? (s.street_max_c * 9) / 5 + 32 : s.street_max_c)}°</span>
             </div>
-            <div className="text-[11px] text-ink-300 mt-2">{Math.round(s.street_spread_c)}° apart, same campus</div>
+            <div className="text-[11px] text-ink-300 mt-2">{Math.round(s.street_spread_c)}° apart, same city</div>
           </div>
         </div>
         <div className="relative mt-4 h-2 rounded-full heat-gradient opacity-25" />
@@ -102,7 +102,7 @@ export function InsightPanel() {
       <section className="space-y-2">
         {[
           { spot: s.hottest, icon: Flame, title: "Hottest street", c: "#ef4444" },
-          { spot: s.coolest, icon: Snowflake, title: "Coolest street", c: "#34e2c6" },
+          { spot: s.coolest, icon: Snowflake, title: "Coolest street", c: "#6fbf5e" },
         ].map((x) => (
           <button
             key={x.title}
@@ -165,7 +165,7 @@ export function InsightPanel() {
             </div>
           </div>
           {[
-            { sw: "linear-gradient(90deg,#34e2c6,#b6fff1)", t: "Cooling corridors", d: "coolest 22% of streets right now" },
+            { sw: "linear-gradient(90deg,#6fbf5e,#b6fff1)", t: "Cooling corridors", d: "coolest 22% of streets right now" },
             { sw: "#ff5a36", t: "Hot streets", d: "hottest 12% — avoid at peak sun" },
             { sw: "radial-gradient(circle,#ffd2b4,#ef4444 60%,transparent 70%)", t: "Hotspots", d: "densest sun-baked ground" },
             { sw: "#050a1c", t: "Computed shadows", d: "buildings × live sun angle" },

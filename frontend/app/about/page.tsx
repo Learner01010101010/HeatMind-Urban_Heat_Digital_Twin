@@ -52,7 +52,7 @@ const SDGS = [
 
 const STATUS: Record<string, string> = {
   real: "bg-emerald-400/15 text-emerald-300",
-  mixed: "bg-sky-400/15 text-sky-300",
+  mixed: "bg-amber-400/15 text-amber-300",
   estimated: "bg-amber-400/15 text-amber-300",
   modelled: "bg-fuchsia-400/15 text-fuchsia-300",
 };
@@ -83,7 +83,7 @@ export default function About() {
             <div className="text-[12px] font-bold uppercase tracking-wider text-cool-300">How it works</div>
             <h1 className="text-3xl md:text-4xl font-extrabold text-ink-100 tracking-tight">Five engines, one twin</h1>
             <p className="text-ink-300 mt-2 max-w-2xl">
-              HeatMind isn&apos;t a route planner with a heat filter bolted on. It&apos;s a living model of how heat moves through {m?.zone.name ?? "the TSSM BSCOER campus"}, and routing is just one of the things built on top of it.
+              HeatMind isn&apos;t a route planner with a heat filter bolted on. It&apos;s a living model of how heat moves through {m?.zone.name ?? "south Pune"}, and routing is just one of the things built on top of it.
             </p>
           </div>
         </header>
