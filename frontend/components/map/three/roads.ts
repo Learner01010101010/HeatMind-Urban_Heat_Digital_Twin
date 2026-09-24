@@ -129,33 +129,69 @@ export class Roads {
     exposure: THREE.Texture,
     reveal: THREE.Texture,
   ) {
-    const pos: number[] = [];
-    const along: number[] = [];
-    const across: number[] = [];
-    const cls: number[] = [];
-    const wid: number[] = [];
+    // Two passes into preallocated typed arrays, same reason as buildings.ts: over
+    // 42 km2 there are ~8,500 ways, and plain number[] pushes do not scale.
+    //
+    // Round caps are only emitted at bends that actually need one. Most OSM polyline
+    // vertices are all but straight, and a cap costs 18 vertices, so capping every
+    // vertex was by far the dominant vertex cost for no visible difference.
+    const CAP_SEGMENTS = 6;
+    const CAP_MIN_TURN = Math.cos((18 * Math.PI) / 180); // cap only past ~18 deg
 
-    const push = (x: number, y: number, s: number, t: number, k: number, w: number) => {
-      pos.push(x, y, ROAD_Z);
-      along.push(s);
-      across.push(t);
-      cls.push(k);
-      wid.push(w);
-    };
+    interface Prepared {
+      pts: THREE.Vector2[];
+      k: number;
+      w: number;
+      caps: boolean[];
+    }
+    const prepared: Prepared[] = [];
+    let vertexCount = 0;
 
     for (const f of features) {
       const p = f.properties;
-      const k = CLASS_INDEX[p.highway] ?? 4;
-      const w = Math.max(2, p.width_m);
-      const half = w / 2;
-
       const pts = f.geometry.coordinates.map((c) => {
         const [x, y] = fields.origin.toXY(c[1], c[0]);
         return new THREE.Vector2(x, y);
       });
       if (pts.length < 2) continue;
+      const k = CLASS_INDEX[p.highway] ?? 4;
+      const w = Math.max(2, p.width_m);
 
+      const caps: boolean[] = new Array(pts.length).fill(false);
+      for (let i = 1; i < pts.length - 1; i++) {
+        const a = pts[i - 1];
+        const b = pts[i];
+        const c = pts[i + 1];
+        const v1x = b.x - a.x, v1y = b.y - a.y;
+        const v2x = c.x - b.x, v2y = c.y - b.y;
+        const l1 = Math.hypot(v1x, v1y), l2 = Math.hypot(v2x, v2y);
+        if (l1 < 1e-4 || l2 < 1e-4) continue;
+        const dot = (v1x * v2x + v1y * v2y) / (l1 * l2);
+        if (dot < CAP_MIN_TURN) caps[i] = true;
+      }
+
+      prepared.push({ pts, k, w, caps });
+      vertexCount += (pts.length - 1) * 6 + caps.filter(Boolean).length * CAP_SEGMENTS * 3;
+    }
+
+    const pos = new Float32Array(vertexCount * 3);
+    const along = new Float32Array(vertexCount);
+    const across = new Float32Array(vertexCount);
+    const cls = new Float32Array(vertexCount);
+    const wid = new Float32Array(vertexCount);
+    let v = 0;
+
+    const push = (x: number, y: number, s: number, t: number, k: number, w: number) => {
+      pos[v * 3] = x; pos[v * 3 + 1] = y; pos[v * 3 + 2] = ROAD_Z;
+      along[v] = s; across[v] = t; cls[v] = k; wid[v] = w;
+      v++;
+    };
+
+    for (const road of prepared) {
+      const { pts, k, w, caps } = road;
+      const half = w / 2;
       let run = 0;
+
       for (let i = 0; i < pts.length - 1; i++) {
         const a = pts[i];
         const b = pts[i + 1];
@@ -170,26 +206,20 @@ export class Roads {
         const s1 = run + len;
         run = s1;
 
-        const aL = [a.x + nx * half, a.y + ny * half];
-        const aR = [a.x - nx * half, a.y - ny * half];
-        const bL = [b.x + nx * half, b.y + ny * half];
-        const bR = [b.x - nx * half, b.y - ny * half];
+        push(a.x + nx * half, a.y + ny * half, s0, 1, k, w);
+        push(a.x - nx * half, a.y - ny * half, s0, -1, k, w);
+        push(b.x - nx * half, b.y - ny * half, s1, -1, k, w);
+        push(a.x + nx * half, a.y + ny * half, s0, 1, k, w);
+        push(b.x - nx * half, b.y - ny * half, s1, -1, k, w);
+        push(b.x + nx * half, b.y + ny * half, s1, 1, k, w);
 
-        push(aL[0], aL[1], s0, 1, k, w);
-        push(aR[0], aR[1], s0, -1, k, w);
-        push(bR[0], bR[1], s1, -1, k, w);
-        push(aL[0], aL[1], s0, 1, k, w);
-        push(bR[0], bR[1], s1, -1, k, w);
-        push(bL[0], bL[1], s1, 1, k, w);
-
-        // A round cap at each interior vertex fills the wedge that two straight
-        // ribbons leave at a bend; cheaper and more robust than mitring, and a
-        // miter blows up at the near-180-degree turns OSM geometry contains.
-        if (i > 0) {
-          const SEGMENTS = 6;
-          for (let j = 0; j < SEGMENTS; j++) {
-            const t0 = (j / SEGMENTS) * Math.PI * 2;
-            const t1 = ((j + 1) / SEGMENTS) * Math.PI * 2;
+        // A round cap fills the wedge two straight ribbons leave at a real bend.
+        // Cheaper and far more robust than mitring, which blows up at the
+        // near-180-degree turns OSM geometry contains.
+        if (caps[i]) {
+          for (let j = 0; j < CAP_SEGMENTS; j++) {
+            const t0 = (j / CAP_SEGMENTS) * Math.PI * 2;
+            const t1 = ((j + 1) / CAP_SEGMENTS) * Math.PI * 2;
             push(a.x, a.y, s0, 0, k, w);
             push(a.x + Math.cos(t0) * half, a.y + Math.sin(t0) * half, s0, 0.9, k, w);
             push(a.x + Math.cos(t1) * half, a.y + Math.sin(t1) * half, s0, 0.9, k, w);
@@ -198,12 +228,13 @@ export class Roads {
       }
     }
 
+    const used = v;
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-    geo.setAttribute("aAlong", new THREE.Float32BufferAttribute(along, 1));
-    geo.setAttribute("aAcross", new THREE.Float32BufferAttribute(across, 1));
-    geo.setAttribute("aClass", new THREE.Float32BufferAttribute(cls, 1));
-    geo.setAttribute("aWidth", new THREE.Float32BufferAttribute(wid, 1));
+    geo.setAttribute("position", new THREE.BufferAttribute(pos.subarray(0, used * 3), 3));
+    geo.setAttribute("aAlong", new THREE.BufferAttribute(along.subarray(0, used), 1));
+    geo.setAttribute("aAcross", new THREE.BufferAttribute(across.subarray(0, used), 1));
+    geo.setAttribute("aClass", new THREE.BufferAttribute(cls.subarray(0, used), 1));
+    geo.setAttribute("aWidth", new THREE.BufferAttribute(wid.subarray(0, used), 1));
     geo.computeBoundingSphere();
 
     const tones: THREE.Color[] = [];
@@ -230,7 +261,7 @@ export class Roads {
 
     this.mesh = new THREE.Mesh(geo, this.material);
     this.mesh.renderOrder = 0; // under GroundHeat, so the heat tints the carriageway
-    this.triangles = pos.length / 9;
+    this.triangles = used / 3;
   }
 
   setSun(intensity: number, color: THREE.Color) {

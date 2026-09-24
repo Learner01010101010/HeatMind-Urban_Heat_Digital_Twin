@@ -221,52 +221,68 @@ export class Buildings {
     exposure: THREE.Texture,
     reveal: THREE.Texture,
   ) {
-    const pos: number[] = [];
-    const nrm: number[] = [];
-    const facade: number[] = [];
-    const seed: number[] = [];
-    const type: number[] = [];
-    const hgt: number[] = [];
-    const roof: number[] = [];
-
-    const push = (
-      x: number,
-      y: number,
-      z: number,
-      nx: number,
-      ny: number,
-      nz: number,
-      fu: number,
-      fv: number,
-      s: number,
-      t: number,
-      h: number,
-      isRoof: number,
-    ) => {
-      pos.push(x, y, z);
-      nrm.push(nx, ny, nz);
-      facade.push(fu, fv);
-      seed.push(s);
-      type.push(t);
-      hgt.push(h);
-      roof.push(isRoof);
-    };
+    // Two passes, into preallocated typed arrays.
+    //
+    // The first version pushed into plain number[] and was fine for 998 footprints.
+    // Over 42 km2 of south Pune there are ~31,000, which is several million pushes
+    // across seven attributes — slow, and it briefly holds the whole thing as boxed
+    // JS numbers before the Float32Array copy. Rings are projected once, reused, and
+    // the exact vertex count is known before a single float is written.
+    const rings: { ring: THREE.Vector2[]; h: number; t: number; s: number; tris: number[][] }[] = [];
+    let vertexCount = 0;
 
     for (const f of features) {
       const p = f.properties;
-      const h = Math.max(2, p.height_m);
-      const t = TYPOLOGY_INDEX[p.typology] ?? 5;
-      const s = p.seed ?? 0;
       const ring = ringToXY(f.geometry.coordinates[0], (la, lo) => fields.origin.toXY(la, lo));
       if (ring.length < 3) continue;
+      let tris: number[][] = [];
+      try {
+        tris = THREE.ShapeUtils.triangulateShape(ring, []);
+      } catch {
+        // Self-intersecting OSM ring: the walls alone still read correctly.
+      }
+      rings.push({
+        ring,
+        h: Math.max(2, p.height_m),
+        t: TYPOLOGY_INDEX[p.typology] ?? 5,
+        s: p.seed ?? 0,
+        tris,
+      });
+      vertexCount += ring.length * 6 + tris.length * 3;
+    }
+
+    const pos = new Float32Array(vertexCount * 3);
+    const nrm = new Float32Array(vertexCount * 3);
+    const facade = new Float32Array(vertexCount * 2);
+    const seed = new Float32Array(vertexCount);
+    const type = new Float32Array(vertexCount);
+    const hgt = new Float32Array(vertexCount);
+    const roof = new Float32Array(vertexCount);
+    let v = 0;
+
+    const push = (
+      x: number, y: number, z: number,
+      nx: number, ny: number, nz: number,
+      fu: number, fv: number,
+      sd: number, ty: number, hh: number, isRoof: number,
+    ) => {
+      pos[v * 3] = x; pos[v * 3 + 1] = y; pos[v * 3 + 2] = z;
+      nrm[v * 3] = nx; nrm[v * 3 + 1] = ny; nrm[v * 3 + 2] = nz;
+      facade[v * 2] = fu; facade[v * 2 + 1] = fv;
+      seed[v] = sd; type[v] = ty; hgt[v] = hh; roof[v] = isRoof;
+      v++;
+    };
+
+    for (const b of rings) {
+      const { ring, h, t, s: sd } = b;
 
       // ---- walls: one quad per footprint edge, UVs in metres ----
       let run = 0;
       for (let i = 0; i < ring.length; i++) {
         const a = ring[i];
-        const b = ring[(i + 1) % ring.length];
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
+        const c = ring[(i + 1) % ring.length];
+        const dx = c.x - a.x;
+        const dy = c.y - a.y;
         const len = Math.hypot(dx, dy);
         if (len < 1e-4) continue;
         const nx = dy / len;
@@ -274,36 +290,33 @@ export class Buildings {
         const u0 = run;
         const u1 = run + len;
         run = u1;
-        push(a.x, a.y, 0, nx, ny, 0, u0, 0, s, t, h, 0);
-        push(b.x, b.y, 0, nx, ny, 0, u1, 0, s, t, h, 0);
-        push(b.x, b.y, h, nx, ny, 0, u1, h, s, t, h, 0);
-        push(a.x, a.y, 0, nx, ny, 0, u0, 0, s, t, h, 0);
-        push(b.x, b.y, h, nx, ny, 0, u1, h, s, t, h, 0);
-        push(a.x, a.y, h, nx, ny, 0, u0, h, s, t, h, 0);
+        push(a.x, a.y, 0, nx, ny, 0, u0, 0, sd, t, h, 0);
+        push(c.x, c.y, 0, nx, ny, 0, u1, 0, sd, t, h, 0);
+        push(c.x, c.y, h, nx, ny, 0, u1, h, sd, t, h, 0);
+        push(a.x, a.y, 0, nx, ny, 0, u0, 0, sd, t, h, 0);
+        push(c.x, c.y, h, nx, ny, 0, u1, h, sd, t, h, 0);
+        push(a.x, a.y, h, nx, ny, 0, u0, h, sd, t, h, 0);
       }
 
       // ---- roof cap ----
-      try {
-        const tris = THREE.ShapeUtils.triangulateShape(ring, []);
-        for (const tri of tris) {
-          for (const idx of tri) {
-            const v = ring[idx];
-            push(v.x, v.y, h, 0, 0, 1, v.x, h, s, t, h, 1);
-          }
+      for (const tri of b.tris) {
+        for (const idx of tri) {
+          const pt = ring[idx];
+          push(pt.x, pt.y, h, 0, 0, 1, pt.x, h, sd, t, h, 1);
         }
-      } catch {
-        // Self-intersecting OSM ring: the walls alone still read correctly.
       }
     }
 
+    // Degenerate edges are skipped, so the filled count can be below the estimate.
+    const used = v;
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-    geo.setAttribute("normal", new THREE.Float32BufferAttribute(nrm, 3));
-    geo.setAttribute("aFacade", new THREE.Float32BufferAttribute(facade, 2));
-    geo.setAttribute("aSeed", new THREE.Float32BufferAttribute(seed, 1));
-    geo.setAttribute("aType", new THREE.Float32BufferAttribute(type, 1));
-    geo.setAttribute("aHeight", new THREE.Float32BufferAttribute(hgt, 1));
-    geo.setAttribute("aRoof", new THREE.Float32BufferAttribute(roof, 1));
+    geo.setAttribute("position", new THREE.BufferAttribute(pos.subarray(0, used * 3), 3));
+    geo.setAttribute("normal", new THREE.BufferAttribute(nrm.subarray(0, used * 3), 3));
+    geo.setAttribute("aFacade", new THREE.BufferAttribute(facade.subarray(0, used * 2), 2));
+    geo.setAttribute("aSeed", new THREE.BufferAttribute(seed.subarray(0, used), 1));
+    geo.setAttribute("aType", new THREE.BufferAttribute(type.subarray(0, used), 1));
+    geo.setAttribute("aHeight", new THREE.BufferAttribute(hgt.subarray(0, used), 1));
+    geo.setAttribute("aRoof", new THREE.BufferAttribute(roof.subarray(0, used), 1));
     geo.computeBoundingSphere();
 
     this.material = new THREE.ShaderMaterial({
@@ -330,7 +343,7 @@ export class Buildings {
 
     this.mesh = new THREE.Mesh(geo, this.material);
     this.mesh.renderOrder = 2;
-    this.triangles = pos.length / 9;
+    this.triangles = used / 3;
   }
 
   setSun(dir: THREE.Vector3, intensity: number, night: boolean, color: THREE.Color) {

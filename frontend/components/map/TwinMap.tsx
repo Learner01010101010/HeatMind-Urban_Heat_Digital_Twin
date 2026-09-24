@@ -2,7 +2,7 @@
 
 import * as maplibregl from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
-import { api, type EquityIndex, type InterventionKind, type InterventionResult, type TwinLayers } from "@/lib/api";
+import { api, type EquityIndex, type InterventionKind, type InterventionResult } from "@/lib/api";
 import { runIntervention, setEndpoint } from "@/lib/actions";
 import { useBaseTime, useFrames, useMeta, useNearestFrame, usePois, useZone } from "@/lib/hooks";
 import { useGeo } from "@/lib/geolocation";
@@ -20,9 +20,13 @@ const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: 
 // The convex-hull shadow fills are gone: they over-covered non-convex footprints
 // (the true shadow is a Minkowski sum, not a hull) and the GPU sun-exposure field
 // in the 3D layer now renders shadows from the same height raster the physics uses.
-const TWIN_LAYERS = ["corridor-glow", "corridor-core", "hot-streets", "hotspots"];
+//
+// The glowing cooling-corridor / hot-street lines and the hotspot heatmap are gone
+// too: blurred neon over a physically lit scene read as a game overlay rather than
+// an instrument. GET /api/heat/layers still serves the data — it is public API and
+// listed in the open-data catalog — it is just no longer painted as neon.
+const TWIN_LAYERS: string[] = [];
 maplibregl.setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
-const layerCache = new Map<string, Promise<TwinLayers>>();
 const equityCache = new Map<string, Promise<EquityIndex>>();
 
 function pinEl(color: string, letter: string) {
@@ -153,30 +157,6 @@ export default function TwinMap() {
       map.addSource("water", { type: "geojson", data: EMPTY });
       map.addLayer({ id: "water", type: "fill", source: "water", paint: { "fill-color": "#0b3350", "fill-opacity": 0.75, "fill-outline-color": "#2b7fb0" } });
       map.addLayer({ id: "labels", type: "raster", source: "labels", paint: { "raster-opacity": 0.75 } });
-      map.addSource("layers", { type: "geojson", data: EMPTY });
-      map.addLayer({
-        id: "corridor-glow", type: "line", source: "layers", filter: ["==", ["get", "cls"], "cool"], layout: { visibility: "none", "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": "#34e2c6", "line-width": ["interpolate", ["linear"], ["zoom"], 14, 6, 18, 22], "line-blur": 8, "line-opacity": 0.45 },
-      });
-      map.addLayer({
-        id: "corridor-core", type: "line", source: "layers", filter: ["==", ["get", "cls"], "cool"], layout: { visibility: "none", "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": "#b6fff1", "line-width": ["interpolate", ["linear"], ["zoom"], 14, 1.2, 18, 3.5], "line-opacity": 0.9 },
-      });
-      map.addLayer({
-        id: "hot-streets", type: "line", source: "layers", filter: ["==", ["get", "cls"], "hot"], layout: { visibility: "none", "line-cap": "round" },
-        paint: { "line-color": "#ff5a36", "line-width": ["interpolate", ["linear"], ["zoom"], 14, 2, 18, 8], "line-blur": 3, "line-opacity": 0.55 },
-      });
-      map.addSource("hotspots", { type: "geojson", data: EMPTY });
-      map.addLayer({
-        id: "hotspots", type: "heatmap", source: "hotspots", layout: { visibility: "none" },
-        paint: {
-          "heatmap-weight": ["get", "w"],
-          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 14, 0.6, 18, 1.4],
-          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 14, 10, 18, 40],
-          "heatmap-opacity": 0.55,
-          "heatmap-color": ["interpolate", ["linear"], ["heatmap-density"], 0, "rgba(0,0,0,0)", 0.3, "rgba(251,138,31,0.35)", 0.6, "rgba(239,68,68,0.65)", 1, "rgba(255,210,180,0.95)"],
-        },
-      });
       map.addSource("equity", { type: "geojson", data: EMPTY });
       map.addLayer({
         id: "equity", type: "fill", source: "equity", layout: { visibility: "none" },
@@ -365,30 +345,6 @@ export default function TwinMap() {
     });
     layerRef.current?.setSun({ elevationDeg, azimuthDeg, intensity });
   }, [ready, meta.data, base, simOffset, timeMin, nearest, layerEpoch]);
-
-  // ───────── cooling corridors / hotspots for the nearest keyframe ─────────
-  useEffect(() => {
-    const map = ready;
-    if (!ready || !map || !nearest || mode !== "twin" || !base) return;
-    const key = `${scenario}|${nearest.time}|${tempDelta}`;
-    const ctrl = { dead: false };
-    const t = setTimeout(() => {
-      if (!layerCache.has(key)) {
-        const p = api.layers({ scenario, time: nearest.time, temp_delta: tempDelta });
-        p.catch(() => layerCache.delete(key));
-        layerCache.set(key, p);
-      }
-      layerCache.get(key)!.then((d) => {
-        if (ctrl.dead || !mapRef.current) return;
-        (map.getSource("layers") as maplibregl.GeoJSONSource).setData(d.corridors);
-        (map.getSource("hotspots") as maplibregl.GeoJSONSource).setData(d.hotspots);
-      });
-    }, 90);
-    return () => {
-      ctrl.dead = true;
-      clearTimeout(t);
-    };
-  }, [ready, nearest, mode, scenario, tempDelta, base]);
 
   // ───────── mode: Map ↔ Heat Twin ─────────
   useEffect(() => {
