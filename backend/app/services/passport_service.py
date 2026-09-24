@@ -145,15 +145,15 @@ def summary(user_id: int) -> dict:
     }
     early = sum(1 for r in week if int(r["logged_at"][11:13]) < 10 or int(r["logged_at"][11:13]) >= 17)
     badges = [
-        {"id": "shade_seeker", "name": "Shade Seeker", "desc": "Walk 50%+ of your weekly distance in shade",
+        {"id": "shade_seeker", "name": "Half your distance in shade", "desc": f"{int(week_stats['pct_shaded'])}% this week",
          "earned": week_stats["pct_shaded"] >= 50, "progress": min(1, week_stats["pct_shaded"] / 50)},
-        {"id": "hydration_hero", "name": "Hydration Hero", "desc": "Take 5 water/rest stops this week",
+        {"id": "hydration_hero", "name": "5 water or rest stops", "desc": f"{week_stats['rest_stops']} this week",
          "earned": week_stats["rest_stops"] >= 5, "progress": min(1, week_stats["rest_stops"] / 5)},
-        {"id": "cool_timer", "name": "Cool Timer", "desc": "Make 5 trips outside peak heat (before 10 AM / after 5 PM)",
+        {"id": "cool_timer", "name": "5 trips outside 10 AM–5 PM", "desc": f"{early} this week",
          "earned": early >= 5, "progress": min(1, early / 5)},
-        {"id": "streak_3", "name": "Heat-Smart Streak", "desc": "3 days in a row within your exposure budget",
+        {"id": "streak_3", "name": "3 days in a row under your limit", "desc": f"{streak} day{'' if streak == 1 else 's'} running",
          "earned": streak >= 3, "progress": min(1, streak / 3)},
-        {"id": "first_trip", "name": "Twin Walker", "desc": "Log your first HeatMind-planned trip",
+        {"id": "first_trip", "name": "Log a trip you planned here", "desc": "Sample trips don't count",
          "earned": any(not r["is_sample"] for r in rows), "progress": 1 if any(not r["is_sample"] for r in rows) else 0},
     ]
     today_row = days[-1]
@@ -184,6 +184,6 @@ def rest_compliance(persona: str, today: dict) -> dict | None:
     return {
         "applies": True, "interval_min": interval, "minutes_exposed": exposed,
         "breaks_required": required, "breaks_taken": taken, "compliant": compliant,
-        "message": ("On track — rest breaks match the recommended interval." if compliant
-                    else f"{behind} rest break{'s' if behind != 1 else ''} behind schedule for a {interval}-minute heat rest interval."),
+        "message": ("You're keeping up with breaks." if compliant
+                    else f"You're {behind} break{'s' if behind != 1 else ''} behind."),
     }
