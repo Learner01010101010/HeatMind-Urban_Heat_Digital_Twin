@@ -87,7 +87,7 @@ export function ProfilePanel() {
         <Link href="/passport" className="press rounded-[22px] p-4 bg-gradient-to-br from-[#ff375f]/25 to-[#ff9f0a]/10 hover:from-[#ff375f]/35">
           <HeartPulse size={20} className="text-[#ff5e7a]" />
           <div className="text-[15px] font-semibold mt-3">Heat Passport</div>
-          <div className="text-[12px] text-ink-300">Your exposure, like Health</div>
+          <div className="text-[12px] text-ink-300">Your heat exposure log</div>
         </Link>
         <Link href="/about" className="press rounded-[22px] p-4 bg-white/[0.04] hover:bg-white/[0.07]">
           <BookOpen size={20} className="text-cool-300" />
