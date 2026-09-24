@@ -24,6 +24,22 @@ TZ = timezone(timedelta(hours=5, minutes=30), name="IST")
 # Raster resolution of the digital twin (metres). PRD asks for ~30 m; we run at 10 m.
 CELL_M = 10.0
 
+# Canyon long-wave trapping model.
+#   on (default) -> canyon = CANYON_K_SVF     * (1 - sky_view_factor)     [physical]
+#   off          -> canyon = CANYON_K_DENSITY * box_blur(building_mask)   [original]
+#                   set HEATMIND_SVF_CANYON=0 to compare against the old model
+# The SVF form is the urban-climatology standard (Oke; SOLWEIG/UMEP) and redistributes
+# canyon heat far more realistically. It SHIFTS REPORTED TEMPERATURES slightly, so any
+# figure quoted in the PRD / demo script must be read against this model, not the old one.
+# CANYON_K_SVF is calibrated so the zone-mean canyon term matches the density model.
+USE_SVF_CANYON = os.environ.get("HEATMIND_SVF_CANYON", "1").lower() in ("1", "true", "yes", "on")
+CANYON_K_DENSITY = 1.2
+# k = 1.98 makes mean(k*(1-SVF)) equal mean(1.2*built_density) over walkable cells,
+# so the zone-average canyon contribution is unchanged and only its DISTRIBUTION
+# improves (corr 0.84 with the old term; p99 0.54 -> 0.72, i.e. real canyons get
+# the trapping that was previously smeared across open ground).
+CANYON_K_SVF = float(os.environ.get("HEATMIND_CANYON_K_SVF", "1.98"))
+
 # Pedestrian "effective heat" thresholds used across the product (°C, feels-like)
 HIGH_HEAT_C = 32.0
 COLOR_MIN_C = 28.0

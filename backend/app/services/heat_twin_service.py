@@ -16,8 +16,9 @@ from datetime import datetime
 
 import numpy as np
 
-from ..config import CENTER, HIGH_HEAT_C
+from ..config import (CANYON_K_DENSITY, CANYON_K_SVF, CENTER, HIGH_HEAT_C, USE_SVF_CANYON)
 from . import geo
+from .anthropogenic import anthropogenic_field
 from .shadow_engine import sun_exposure
 from .solar import solar_position
 from .weather import Weather, weather_service
@@ -40,6 +41,21 @@ INTERVENTIONS = {
                 "canopy or bus-stop-style structure at this exact spot.",
     },
 }
+
+
+def canyon_term(z: Zone, rs=None, cs=None) -> np.ndarray:
+    """Long-wave heat trapped between buildings.
+
+    Default: a box-blurred built-density proxy (the original hand-tuned model).
+    With HEATMIND_SVF_CANYON=1: (1 - sky view factor), the standard urban-canyon
+    geometry term, which concentrates trapping in genuinely enclosed streets
+    instead of smearing it over every built-up neighbourhood.
+    """
+    if USE_SVF_CANYON:
+        svf = z.svf if rs is None else z.svf[rs, cs]
+        return CANYON_K_SVF * (1.0 - svf)
+    dens = z.built_density if rs is None else z.built_density[rs, cs]
+    return CANYON_K_DENSITY * dens
 
 
 def heat_index_c(t_c: np.ndarray | float, rh: float) -> np.ndarray:
@@ -74,6 +90,7 @@ class Frame:
     tree_occ: np.ndarray
     t_surface: np.ndarray
     feels: np.ndarray
+    anthro: np.ndarray
     stats: dict = field(default_factory=dict)
 
     def encode(self) -> dict:
@@ -148,11 +165,15 @@ class HeatTwin:
         hi_air = float(heat_index_c(w.air_c, w.rh))
         solar_load = 5.6 * intensity * exposure  # direct beam on the body (mean-radiant-temperature proxy)
         ground_rad = 0.15 * (t_surf - w.air_c)  # long-wave from hot ground
-        canyon = 1.2 * z.built_density  # heat trapped between buildings
+        canyon = canyon_term(z)  # heat trapped between buildings
+        # Waste heat people put into the street: congestion-scaled traffic + industrial
+        # duty cycle. Replaces the old constant per-road-class weight.
+        anthro = anthropogenic_field(z, when)
         cooling = 2.2 * z.canopy_cooling + 2.4 * z.water_cooling + 0.35 * max(0.0, w.wind_ms - 1.0)
-        feels = hi_air + solar_load + ground_rad + z.traffic + canyon - cooling
+        feels = hi_air + solar_load + ground_rad + anthro + canyon - cooling
 
-        f = Frame(when, scenario, temp_delta, w, elev, az, intensity, exposure, bshadow, tocc, t_surf, feels)
+        f = Frame(when, scenario, temp_delta, w, elev, az, intensity, exposure, bshadow, tocc, t_surf,
+                  feels, anthro)
         f.stats = self._stats(f)
         return f
 
@@ -202,7 +223,7 @@ class HeatTwin:
             "surface_c": round(float(f.t_surface[r, c]), 1), "air_c": round(f.weather.air_c, 1),
             "sun_exposure": round(float(f.exposure[r, c]), 2),
             "building_shadow": bool(f.building_shadow[r, c] > 0.5), "canopy": round(float(z.canopy[r, c]), 2),
-            "surface": CODE_LABEL[int(z.surface[r, c])], "traffic_heat_c": round(float(z.traffic[r, c]), 1),
+            "surface": CODE_LABEL[int(z.surface[r, c])], "traffic_heat_c": round(float(f.anthro[r, c]), 1),
             "near": self.nearest_name(r, c),
         }
 
@@ -248,9 +269,9 @@ class HeatTwin:
         hi_air = float(heat_index_c(f.weather.air_c, f.weather.rh))
         solar_load = 5.6 * f.intensity * exposure
         ground_rad = 0.15 * (t_surf - f.weather.air_c)
-        canyon = 1.2 * z.built_density[rs, cs]
+        canyon = canyon_term(z, rs, cs)
         cooling = 2.2 * canopy_cooling + 2.4 * z.water_cooling[rs, cs] + 0.35 * max(0.0, f.weather.wind_ms - 1.0)
-        feels_after = hi_air + solar_load + ground_rad + z.traffic[rs, cs] + canyon - cooling
+        feels_after = hi_air + solar_load + ground_rad + f.anthro[rs, cs] + canyon - cooling
 
         before = f.feels[rs, cs]
         before_mean = float(before[wk].mean())

@@ -5,18 +5,24 @@ import { useEffect, useRef, useState } from "react";
 import { api, type EquityIndex, type InterventionKind, type InterventionResult, type TwinLayers } from "@/lib/api";
 import { runIntervention, setEndpoint } from "@/lib/actions";
 import { useBaseTime, useFrames, useMeta, useNearestFrame, usePois, useZone } from "@/lib/hooks";
+import { useGeo } from "@/lib/geolocation";
 import { fmtDelta, fmtTemp, heatColor, heatLabel, riskColor } from "@/lib/heatColorScale";
 import { INTERVENTION_STYLE } from "@/lib/interventionStyle";
 import { POI_STYLE } from "@/lib/poiStyle";
+import { solarIntensity, solarPosition } from "@/lib/solar";
 import { atTime, keyframes, SCENARIO, TIMELINE, useMap, usePrefs } from "@/lib/store";
+import { HeatTwinLayer } from "./three/HeatTwinLayer";
+import { loadFields } from "./three/fields";
+import type { TreeRecord } from "./three/trees";
 
 const ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas";
 const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
-const HEAT_OPACITY = { map: 0.42, twin: 0.58 };
-const TWIN_LAYERS = ["shadows", "corridor-glow", "corridor-core", "hot-streets", "hotspots"];
+// The convex-hull shadow fills are gone: they over-covered non-convex footprints
+// (the true shadow is a Minkowski sum, not a hull) and the GPU sun-exposure field
+// in the 3D layer now renders shadows from the same height raster the physics uses.
+const TWIN_LAYERS = ["corridor-glow", "corridor-core", "hot-streets", "hotspots"];
 maplibregl.setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
 const layerCache = new Map<string, Promise<TwinLayers>>();
-const shadowCache = new Map<string, Promise<GeoJSON.FeatureCollection>>();
 const equityCache = new Map<string, Promise<EquityIndex>>();
 
 function pinEl(color: string, letter: string) {
@@ -72,12 +78,14 @@ export default function TwinMap() {
   const mapRef = useRef<maplibregl.Map | null>(null);
   // readiness is tied to a specific map instance, so effects never touch a map that is still loading
   const [ready, setReady] = useState<maplibregl.Map | null>(null);
-  const heatUrls = useRef<(string | null)[]>(TIMELINE.map(() => null));
+  const layerRef = useRef<HeatTwinLayer | null>(null);
+  const [layerEpoch, setLayerEpoch] = useState(0);
   const odMarkers = useRef<maplibregl.Marker[]>([]);
   const chipMarkers = useRef<Map<string, maplibregl.Marker>>(new Map());
   const spotMarkers = useRef<maplibregl.Marker[]>([]);
   const interventionMarkersRef = useRef<maplibregl.Marker[]>([]);
   const communityMarkersRef = useRef<maplibregl.Marker[]>([]);
+  const meMarker = useRef<maplibregl.Marker | null>(null);
   const fittedFor = useRef<string | null>(null);
 
   const meta = useMeta();
@@ -97,6 +105,10 @@ export default function TwinMap() {
   const simOffset = useMap((s) => s.simOffsetMin);
   const tempDelta = useMap((s) => s.tempDelta);
   const interventionResults = useMap((s) => s.interventionResults);
+  const geoLat = useGeo((s) => s.lat);
+  const geoLon = useGeo((s) => s.lon);
+  const geoStatus = useGeo((s) => s.status);
+  const revealOn = useMap((s) => s.revealOn);
   const equityOn = useMap((s) => s.equityOn);
   const myPendingPois = useMap((s) => s.myPendingPois);
   const [approvedPois, setApprovedPois] = useState<Awaited<ReturnType<typeof api.communityPois>> | null>(null);
@@ -140,8 +152,6 @@ export default function TwinMap() {
     map.on("load", () => {
       map.addSource("water", { type: "geojson", data: EMPTY });
       map.addLayer({ id: "water", type: "fill", source: "water", paint: { "fill-color": "#0b3350", "fill-opacity": 0.75, "fill-outline-color": "#2b7fb0" } });
-      map.addSource("shadows", { type: "geojson", data: EMPTY });
-      map.addLayer({ id: "shadows", type: "fill", source: "shadows", layout: { visibility: "none" }, paint: { "fill-color": "#050a1c", "fill-opacity": 0.5, "fill-opacity-transition": { duration: 400 } } });
       map.addLayer({ id: "labels", type: "raster", source: "labels", paint: { "raster-opacity": 0.75 } });
       map.addSource("layers", { type: "geojson", data: EMPTY });
       map.addLayer({
@@ -180,16 +190,6 @@ export default function TwinMap() {
       });
       map.addSource("buildings", { type: "geojson", data: EMPTY });
       map.addLayer({ id: "buildings-2d", type: "fill", source: "buildings", paint: { "fill-color": "#141a27", "fill-opacity": 0.92, "fill-outline-color": "#232c3e" } });
-      map.addLayer({
-        id: "buildings-3d", type: "fill-extrusion", source: "buildings", layout: { visibility: "none" },
-        paint: {
-          "fill-extrusion-color": ["interpolate", ["linear"], ["get", "height_m"], 3, "#1c2436", 12, "#243049", 30, "#33436a"],
-          "fill-extrusion-height": 0,
-          "fill-extrusion-base": 0,
-          "fill-extrusion-opacity": 0.93,
-          "fill-extrusion-vertical-gradient": true,
-        },
-      });
       map.addSource("pois", { type: "geojson", data: EMPTY });
       map.addLayer({
         id: "pois", type: "circle", source: "pois", minzoom: 14.5,
@@ -233,55 +233,143 @@ export default function TwinMap() {
     });
   }, [ready, zone.data]);
 
-  // ───────── heat keyframe rasters (one image source per keyframe) ─────────
+  // ───────── the 3D twin: one custom layer inside MapLibre's own GL context ─────────
+  // Replaces thirteen PNG image sources whose opacity was cross-faded. That blended
+  // COLOURS: mixing the teal of "now" with the orange of "+1h" landed on an olive that
+  // matches no temperature on the scale. The layer mixes the two keyframes in encoded
+  // temperature space and applies the colour ramp afterwards.
   useEffect(() => {
     const map = ready;
-    if (!ready || !map) return;
-    frames.forEach((f, i) => {
-      if (!f || heatUrls.current[i] === f.heatUrl) return;
-      const [s, w, n, e] = f.grid.bbox;
-      const id = `heat-${i}`;
-      const src = map.getSource(id) as maplibregl.ImageSource | undefined;
-      if (src) src.updateImage({ url: f.heatUrl });
-      else {
-        map.addSource(id, { type: "image", url: f.heatUrl, coordinates: [[w, n], [e, n], [e, s], [w, s]] });
-        // keyframes stack in time order so the later frame blends over the earlier one
-        const before = TIMELINE.slice(i + 1).map((_, k) => `heat-${i + 1 + k}`).find((x) => map.getLayer(x)) ?? "water";
-        map.addLayer({ id, type: "raster", source: id, paint: { "raster-opacity": 0, "raster-fade-duration": 0, "raster-resampling": "linear" } }, before);
-      }
-      heatUrls.current[i] = f.heatUrl;
-    });
-  }, [ready, frames]);
+    if (!ready || !map || !zone.data) return;
+    let dead = false;
+    let added: HeatTwinLayer | null = null;
 
-  // blend the two keyframes around the timeline position
+    loadFields()
+      .then((fields) => {
+        if (dead || !mapRef.current) return;
+        const trees: TreeRecord[] = zone.data!.trees.features.map((f) => {
+          const c = (f.geometry as GeoJSON.Point).coordinates;
+          const pr = f.properties as { r: number; d: number } | null;
+          return { lat: c[1], lon: c[0], radiusM: pr?.r ?? 4, density: pr?.d ?? 0.7 };
+        });
+        const layer = new HeatTwinLayer(
+          fields,
+          zone.data!.buildings.features,
+          trees,
+          zone.data!.roads.features,
+        );
+        // above the basemap, below the labels and every vector overlay
+        map.addLayer(layer, "labels");
+        layerRef.current = layer;
+        added = layer;
+        setLayerEpoch((n) => n + 1);
+      })
+      .catch(() => {});
+
+    return () => {
+      dead = true;
+      const m = mapRef.current;
+      if (added && m && m.getLayer(added.id)) m.removeLayer(added.id);
+      layerRef.current = null;
+    };
+  }, [ready, zone.data]);
+
+  // the two keyframes bracketing the scrub position, blended in temperature space
   useEffect(() => {
-    const map = ready;
-    if (!ready || !map) return;
+    const layer = layerRef.current;
+    if (!layer) return;
     const { i0, i1, t } = keyframes(timeMin);
-    const O = HEAT_OPACITY[mode];
-    TIMELINE.forEach((_, i) => {
-      const id = `heat-${i}`;
-      if (!map.getLayer(id)) return;
-      let o = 0;
-      if (i === i0) o = O;
-      if (i === i1 && i1 !== i0 && frames[i1]) o = O * t;
-      if (i === i0 && !frames[i0]) o = 0;
-      map.setPaintProperty(id, "raster-opacity", o);
-    });
-  }, [ready, timeMin, mode, frames]);
+    layer.setKeyframes(frames[i0] ?? null, frames[i1] ?? null, t);
+  }, [frames, timeMin, layerEpoch]);
 
-  // ───────── sun-driven lighting + twin overlays for the nearest keyframe ─────────
+  // ───────── follow the user: reveal the twin along the path walked ─────────
+  // Each fix paints into the reveal field, and ground already covered stays visible,
+  // so the twin builds up along the route rather than pulsing around a moving disc.
   useEffect(() => {
     const map = ready;
-    if (!ready || !map || !nearest) return;
-    const elev = nearest.sun.elevation_deg;
+    const layer = layerRef.current;
+    if (!map || geoLat === null || geoLon === null) return;
+
+    layer?.addPositionFix(geoLat, geoLon);
+
+    // the user's own position is the natural trip origin
+    const cur = useMap.getState().origin;
+    if (!cur || Math.abs(cur.lat - geoLat) > 1e-4 || Math.abs(cur.lon - geoLon) > 1e-4) {
+      useMap.getState().set({
+        origin: {
+          lat: geoLat,
+          lon: geoLon,
+          // a simulated walk is never labelled as a real fix
+          label: geoStatus === "simulated" ? "Simulated position" : "My location",
+        },
+      });
+    }
+
+    if (!meMarker.current) {
+      const d = document.createElement("div");
+      d.className = "hm-me";
+      meMarker.current = new maplibregl.Marker({ element: d }).setLngLat([geoLon, geoLat]).addTo(map);
+    } else {
+      meMarker.current.setLngLat([geoLon, geoLat]);
+    }
+    meMarker.current.getElement().dataset.sim = geoStatus === "simulated" ? "1" : "0";
+  }, [ready, geoLat, geoLon, geoStatus, layerEpoch]);
+
+  useEffect(() => {
+    layerRef.current?.setRevealEnabled(revealOn);
+  }, [revealOn, layerEpoch]);
+
+  useEffect(() => {
+    return () => {
+      meMarker.current?.remove();
+      meMarker.current = null;
+    };
+  }, []);
+
+  // canopy planted by the intervention simulator becomes real geometry, which the
+  // next sun march then casts a real shadow from
+  useEffect(() => {
+    const layer = layerRef.current;
+    if (!layer) return;
+    layer.setPlantedTrees(
+      interventionResults
+        .filter((r) => r.kind === "trees")
+        .map((r) => ({
+          lat: r.center.lat,
+          lon: r.center.lon,
+          radiusM: Math.max(4, r.radius_m * 0.45),
+          density: 0.85,
+        })),
+    );
+  }, [interventionResults, layerEpoch]);
+
+  // ───────── continuous sun ─────────
+  // The backend reports sun position per 15-minute keyframe, so driving the light from
+  // the nearest keyframe made shadows jump a quarter hour at a time while scrubbing.
+  // solarPosition() is a straight port of the backend's NOAA algorithm, so evaluating
+  // it at the exact scrub time is free, gives continuously moving shadows, and cannot
+  // drift from the model that produced the temperatures.
+  useEffect(() => {
+    const map = ready;
+    if (!ready || !map || !meta.data || !base) return;
+    const when = new Date(new Date(base).getTime() + (simOffset + timeMin) * 60_000);
+    const [lat, lon] = meta.data.zone.center;
+    const { elevationDeg, azimuthDeg } = solarPosition(when, lat, lon);
+    const intensity = solarIntensity(elevationDeg, nearest?.weather.cloud_pct ?? 0);
+
     map.setLight({
       anchor: "map",
-      position: [1.4, nearest.sun.azimuth_deg, Math.min(88, Math.max(8, 90 - elev))],
-      color: elev > 0 ? "#fff1dc" : "#8aa4ff",
-      intensity: elev > 0 ? 0.5 : 0.18,
+      position: [1.4, azimuthDeg, Math.min(88, Math.max(8, 90 - elevationDeg))],
+      color: elevationDeg > 0 ? "#fff1dc" : "#8aa4ff",
+      intensity: elevationDeg > 0 ? 0.5 : 0.18,
     });
-    if (mode !== "twin" || !base) return;
+    layerRef.current?.setSun({ elevationDeg, azimuthDeg, intensity });
+  }, [ready, meta.data, base, simOffset, timeMin, nearest, layerEpoch]);
+
+  // ───────── cooling corridors / hotspots for the nearest keyframe ─────────
+  useEffect(() => {
+    const map = ready;
+    if (!ready || !map || !nearest || mode !== "twin" || !base) return;
     const key = `${scenario}|${nearest.time}|${tempDelta}`;
     const ctrl = { dead: false };
     const t = setTimeout(() => {
@@ -290,20 +378,10 @@ export default function TwinMap() {
         p.catch(() => layerCache.delete(key));
         layerCache.set(key, p);
       }
-      const sk = `${scenario}|${nearest.time}`;
-      if (!shadowCache.has(sk)) {
-        const p = api.shadow({ scenario, time: nearest.time }).then((r) => r.shadows);
-        p.catch(() => shadowCache.delete(sk));
-        shadowCache.set(sk, p);
-      }
       layerCache.get(key)!.then((d) => {
         if (ctrl.dead || !mapRef.current) return;
         (map.getSource("layers") as maplibregl.GeoJSONSource).setData(d.corridors);
         (map.getSource("hotspots") as maplibregl.GeoJSONSource).setData(d.hotspots);
-      });
-      shadowCache.get(sk)!.then((d) => {
-        if (ctrl.dead || !mapRef.current) return;
-        (map.getSource("shadows") as maplibregl.GeoJSONSource).setData(d);
       });
     }, 90);
     return () => {
@@ -318,24 +396,13 @@ export default function TwinMap() {
     if (!ready || !map) return;
     const twin = mode === "twin";
     TWIN_LAYERS.forEach((id) => map.setLayoutProperty(id, "visibility", twin ? "visible" : "none"));
+    // MAP mode keeps its flat footprints; the 3D layer eases its own extrusions in and
+    // out of the ground from inside the render loop, so there is no RAF to drive here.
     map.setLayoutProperty("buildings-2d", "visibility", twin ? "none" : "visible");
-    map.setLayoutProperty("buildings-3d", "visibility", twin ? "visible" : "none");
     map.setPaintProperty("labels", "raster-opacity", twin ? 0.35 : 0.75);
     map.easeTo({ pitch: twin ? 62 : 0, bearing: twin ? -28 : 0, zoom: twin ? Math.max(map.getZoom(), 16) : map.getZoom(), duration: reduceMotion ? 0 : 1400, easing: (x) => 1 - Math.pow(1 - x, 4) });
-    // grow the extrusions out of the ground
-    let raf = 0;
-    const start = performance.now();
-    const dur = reduceMotion ? 1 : 1100;
-    const step = (now: number) => {
-      const k = Math.min(1, (now - start) / dur);
-      const e = 1 - Math.pow(1 - k, 3);
-      const h = twin ? e : 1 - e;
-      map.setPaintProperty("buildings-3d", "fill-extrusion-height", ["*", ["get", "height_m"], h]);
-      if (k < 1) raf = requestAnimationFrame(step);
-    };
-    if (twin) raf = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(raf);
-  }, [ready, mode, reduceMotion]);
+    layerRef.current?.setMode(twin);
+  }, [ready, mode, reduceMotion, layerEpoch]);
 
   // hottest / coolest beacons in twin mode
   useEffect(() => {

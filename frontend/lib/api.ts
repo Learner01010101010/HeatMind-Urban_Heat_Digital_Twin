@@ -202,10 +202,85 @@ export interface Meta {
   provenance: { layer: string; source: string; status: "real" | "mixed" | "estimated" | "modelled" }[];
 }
 
+/** Static raster fields of the twin, uploaded to the GPU once (see /api/zone/fields). */
+export interface ZoneFields {
+  rows: number;
+  cols: number;
+  cell_m: number;
+  bbox: [number, number, number, number];
+  /** Mirrors the backend's local equirectangular projection so the client can render in metres. */
+  origin: {
+    lat0: number;
+    lon0: number;
+    m_per_deg_lat: number;
+    m_per_deg_lon: number;
+    width_m: number;
+    height_m: number;
+  };
+  height_scale_m: number;
+  encoding: Record<string, string>;
+  surface_classes: Record<string, string>;
+  height_b64: string;
+  canopy_b64: string;
+  svf_b64: string;
+  surface_b64: string;
+  road_b64: string;
+}
+
+/** Render typology for a footprint — from OSM where tagged, inferred otherwise. */
+export type Typology =
+  | "academic"
+  | "campus_support"
+  | "commercial"
+  | "industrial"
+  | "apartments"
+  | "residential"
+  | "house"
+  | "shed"
+  | "temple";
+
+export interface BuildingProps {
+  name: string;
+  kind: string;
+  height_m: number;
+  height_source: "osm" | "estimated";
+  area_m2: number;
+  typology: Typology;
+  typology_source: "osm" | "inferred";
+  seed: number;
+}
+
+export interface RoadProps {
+  name: string;
+  highway: string;
+  surface: string;
+  width_m: number;
+  walkable: boolean;
+  bikeable: boolean;
+  /** jam-hour traffic heat weight for this road class, °C */
+  traffic_heat_c: number;
+}
+
+/** Traffic + industrial waste heat at a moment (see /api/anthropogenic). */
+export interface AnthropogenicReport {
+  time: string;
+  traffic: { congestion_factor: number; source: string; mean_c: number; max_c: number; peak_hours: string };
+  industrial: {
+    duty_cycle: number;
+    source_count: number;
+    source: string;
+    mean_c: number;
+    max_c: number;
+    sources: { id: string; name: string; lat: number; lon: number; area_m2: number; peak_c: number; reach_m: number }[];
+  };
+  note: string;
+}
+
 export interface ZoneData {
   meta: { name: string; counts: Record<string, number> };
-  buildings: GeoJSON.FeatureCollection;
+  buildings: GeoJSON.FeatureCollection<GeoJSON.Polygon, BuildingProps>;
   surfaces: GeoJSON.FeatureCollection;
+  roads: GeoJSON.FeatureCollection<GeoJSON.LineString, RoadProps>;
   trees: GeoJSON.FeatureCollection;
   places: Place[];
 }
@@ -400,6 +475,8 @@ const qs = (o: Record<string, string | number | boolean | undefined | null>) =>
 export const api = {
   meta: () => req<Meta>("/api/meta"),
   zone: () => req<ZoneData>("/api/zone"),
+  zoneFields: () => req<ZoneFields>("/api/zone/fields"),
+  anthropogenic: (p: { time?: string } = {}) => req<AnthropogenicReport>(`/api/anthropogenic?${qs(p)}`),
   twin: (p: { scenario: Scenario; time?: string; offset_min?: number; temp_delta?: number }, signal?: AbortSignal) =>
     req<TwinResponse>(`/api/heat/twin?${qs(p)}`, { signal }),
   point: (p: { lat: number; lon: number; scenario: Scenario; time?: string; offset_min?: number; temp_delta?: number }) =>

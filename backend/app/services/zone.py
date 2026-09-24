@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 from functools import lru_cache
 
 import numpy as np
@@ -22,6 +23,11 @@ SURFACES = {
     "dirt": (7, 14.0, "Dirt / gravel"),
     "gravel": (7, 14.0, "Dirt / gravel"),
 }
+# Coarse bucket size for the road-segment index, and how far past the asphalt
+# edge a trunk still counts as standing in the road.
+_SEG_BUCKET_M = 40.0
+_KERB_ALLOWANCE_M = 0.8
+
 CODE_GAIN = np.zeros(8)
 CODE_LABEL = [""] * 8
 for _k, (_code, _gain, _label) in SURFACES.items():
@@ -95,8 +101,24 @@ class Zone:
                 building[rs, cs] |= mask
         surface[building] = SURFACES["roof"][0]
 
+        # Street trees are seeded beside road centrelines with only a 1-3 m offset
+        # (osm_ingest), and that seeding only checked building footprints -- never the
+        # carriageway -- so trunks ended up standing in the road.
+        #
+        # The test is geometric, against the true carriageway half-width, NOT against
+        # road_mask: that mask is inflated to a 10 m minimum (line_mask floors the
+        # half-width at half a cell) so every 3 m service lane rasterises 10 m wide, and
+        # testing against it rejected 54% of the zone's trees -- including every tree
+        # correctly standing on a verge.
+        #
+        # Only the TRUNK is filtered. Canopy is still free to overhang the road, because
+        # that overhang is exactly what shades a street; removing it would delete the
+        # cooling effect the whole product exists to show.
+        self.trees = [t for t in self.data["trees"] if not self._on_carriageway(t["lat"], t["lon"])]
+        self.trees_dropped_on_road = len(self.data["trees"]) - len(self.trees)
+
         canopy = np.zeros((R, C))
-        for t in self.data["trees"]:
+        for t in self.trees:
             x, y = geo.to_xy(t["lat"], t["lon"])
             m = geo.disk_mask(x, y, t["radius_m"] + geo.CELL_M * 0.5)
             if m:
@@ -122,15 +144,82 @@ class Zone:
 
         self.places = self.data["places"]
         self.pois = self.data["pois"]
+        self._svf: np.ndarray | None = None
+
+    @property
+    def svf(self) -> np.ndarray:
+        """Sky view factor (0 = deep canyon, 1 = open sky), from services.svf.
+
+        Lazy + disk-cached: the horizon scan costs ~10-20 s on a cold boot and is
+        independent of time and weather, so it is computed at most once per zone.
+        """
+        if self._svf is None:
+            from .svf import load
+            self._svf = load(self.height, self.building)
+        return self._svf
+
+
+    def _on_carriageway(self, lat: float, lon: float) -> bool:
+        """True when this point lies within the real carriageway of any road.
+
+        Uses the OSM width, with a 1.2 m half-width floor so zero-width paths still
+        register, and a small kerb allowance so trunks are not left overhanging the
+        asphalt edge.
+        """
+        if not hasattr(self, "_seg_index"):
+            self._build_seg_index()
+        x, y = geo.to_xy(lat, lon)
+        cell = int(x // _SEG_BUCKET_M), int(y // _SEG_BUCKET_M)
+        for dc in (-1, 0, 1):
+            for dr in (-1, 0, 1):
+                for ax, ay, bx, by, half in self._seg_index.get((cell[0] + dc, cell[1] + dr), ()):
+                    dx, dy = bx - ax, by - ay
+                    L2 = dx * dx + dy * dy
+                    t = 0.0 if L2 == 0 else max(0.0, min(1.0, ((x - ax) * dx + (y - ay) * dy) / L2))
+                    if math.hypot(x - (ax + t * dx), y - (ay + t * dy)) <= half:
+                        return True
+        return False
+
+    def _build_seg_index(self) -> None:
+        """Bucket road segments by a coarse grid so the trunk test stays O(1) per tree."""
+        idx: dict[tuple[int, int], list] = {}
+        for r in self.data["roads"]:
+            half = max(r["width_m"] / 2, 1.2) + _KERB_ALLOWANCE_M
+            pts = [geo.to_xy(la, lo) for _, la, lo in r["nodes"]]
+            for (ax, ay), (bx, by) in zip(pts[:-1], pts[1:]):
+                seg = (ax, ay, bx, by, half)
+                c0 = int(min(ax, bx) // _SEG_BUCKET_M)
+                c1 = int(max(ax, bx) // _SEG_BUCKET_M)
+                r0 = int(min(ay, by) // _SEG_BUCKET_M)
+                r1 = int(max(ay, by) // _SEG_BUCKET_M)
+                for cc in range(c0, c1 + 1):
+                    for rr in range(r0, r1 + 1):
+                        idx.setdefault((cc, rr), []).append(seg)
+        self._seg_index = idx
 
     # --- GeoJSON exports -------------------------------------------------
     def buildings_geojson(self) -> dict:
-        return {"type": "FeatureCollection", "features": [
-            {"type": "Feature", "id": b["id"],
-             "properties": {"name": b["name"], "kind": b["kind"], "height_m": b["height_m"],
-                            "height_source": b["height_source"]},
-             "geometry": {"type": "Polygon", "coordinates": [[[lo, la] for la, lo in b["ring"]]]}}
-            for b in self.data["buildings"]]}
+        """Footprints + the metadata the 3D facade generator needs.
+
+        `typology` is the render-time building class: taken from the OSM tag when
+        there is one, otherwise inferred from geometry and surroundings and
+        labelled `typology_source: "inferred"` (see services.building_types).
+        `seed` is a stable per-building integer so procedural facade variation is
+        deterministic across reloads rather than reshuffling on every render.
+        """
+        from .building_types import classify_cached
+        types = classify_cached(self)
+        feats = []
+        for b in self.data["buildings"]:
+            typology, src = types.get(b["id"], ("residential", "inferred"))
+            feats.append({
+                "type": "Feature", "id": b["id"],
+                "properties": {"name": b["name"], "kind": b["kind"], "height_m": b["height_m"],
+                               "height_source": b["height_source"], "area_m2": b["area_m2"],
+                               "typology": typology, "typology_source": src,
+                               "seed": int(b["osm_id"]) & 0xFFFF},
+                "geometry": {"type": "Polygon", "coordinates": [[[lo, la] for la, lo in b["ring"]]]}})
+        return {"type": "FeatureCollection", "features": feats}
 
     def surfaces_geojson(self) -> dict:
         return {"type": "FeatureCollection", "features": [
@@ -138,10 +227,25 @@ class Zone:
              "geometry": {"type": "Polygon", "coordinates": [[[lo, la] for la, lo in s["ring"]]]}}
             for s in self.data["surfaces"]]}
 
+    def roads_geojson(self) -> dict:
+        """The real OSM street network, for the 3D renderer to build road ribbons from.
+
+        Carries the width and class the heat model already uses, so the carriageway
+        drawn on screen is the same one that carries the traffic-heat term.
+        """
+        return {"type": "FeatureCollection", "features": [
+            {"type": "Feature", "id": r["id"],
+             "properties": {"name": r["name"], "highway": r["highway"], "surface": r["surface"],
+                            "width_m": r["width_m"], "walkable": r["walkable"], "bikeable": r["bikeable"],
+                            "traffic_heat_c": TRAFFIC_HEAT.get(r["highway"], 0.0)},
+             "geometry": {"type": "LineString",
+                          "coordinates": [[round(lo, 7), round(la, 7)] for _, la, lo in r["nodes"]]}}
+            for r in self.data["roads"]]}
+
     def trees_geojson(self) -> dict:
         return {"type": "FeatureCollection", "features": [
             {"type": "Feature", "properties": {"r": t["radius_m"], "d": t["density"], "src": t["source"]},
-             "geometry": {"type": "Point", "coordinates": [t["lon"], t["lat"]]}} for t in self.data["trees"]]}
+             "geometry": {"type": "Point", "coordinates": [t["lon"], t["lat"]]}} for t in self.trees]}
 
 
 @lru_cache(maxsize=1)
