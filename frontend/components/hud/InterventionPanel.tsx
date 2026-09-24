@@ -79,7 +79,7 @@ export default function InterventionPanel({ compact = false }: { compact?: boole
             </div>
 
             {picking && (
-              <div className="mt-3 rounded-2xl px-3 py-2 text-[12px] flex items-center gap-2" style={{ background: "rgba(52,226,198,.12)", color: "#7ff3de" }}>
+              <div className="mt-3 rounded-2xl px-3 py-2 text-[12px] flex items-center gap-2 bg-white/[0.06] text-ink-100">
                 {busy ? "Simulating…" : "Tap the map to preview here"}
               </div>
             )}
@@ -113,9 +113,8 @@ export default function InterventionPanel({ compact = false }: { compact?: boole
           if (picking) set({ pickMode: null });
           setOpen((o) => !o);
         }}
-        className={`press glass flex items-center justify-center gap-2 rounded-full text-[14px] font-semibold ${compact ? "w-11 h-11" : "h-12 pl-3.5 pr-4"} ${picking ? "glow-pulse" : ""}`}
+        className={`press glass flex items-center justify-center gap-2 rounded-full text-[14px] font-semibold ${compact ? "w-11 h-11" : "h-12 pl-3.5 pr-4"} ${picking ? "glow-pulse bg-ink-100 text-ink-950" : ""}`}
         aria-label="Simulate a street-cooling intervention"
-        style={picking ? { background: "linear-gradient(135deg, rgba(52,226,198,.95), rgba(76,195,255,.9))", color: "#04140f" } : undefined}
         aria-expanded={open}
       >
         {picking ? <X size={16} /> : <Sprout size={16} className={results.length ? "text-cool-400" : "text-ink-200"} />}

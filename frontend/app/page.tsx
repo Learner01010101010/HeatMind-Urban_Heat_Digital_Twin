@@ -37,6 +37,7 @@ function pickModeLabel(pickMode: PickMode): string {
 export default function Home() {
   const router = useRouter();
   const hydrated = useHydrated();
+  const onboarded = usePrefs((s) => s.onboarded);
   const wide = useMedia("(min-width: 768px)");
   useFrameLoader();
 
@@ -50,8 +51,8 @@ export default function Home() {
   const close = () => set({ panel: null });
 
   useEffect(() => {
-    if (hydrated && !usePrefs.getState().onboarded) router.replace("/onboarding");
-  }, [hydrated, router]);
+    if (hydrated && !onboarded) router.replace("/onboarding");
+  }, [hydrated, onboarded, router]);
 
   // Live re-baselining: every 5 minutes the active trip is re-scored against the new "now".
   const lastBase = useRef(base);
@@ -67,6 +68,9 @@ export default function Home() {
   ) : loading ? (
     <div className={`glass-strong skeleton rounded-[26px] ${wide ? "w-[340px] h-[240px]" : "w-full h-[118px]"}`} />
   ) : null;
+
+  // Don't flash the map/HUD before the redirect to /onboarding fires (or while prefs are still loading).
+  if (!hydrated || !onboarded) return <main className="fixed inset-0 bg-ink-950" />;
 
   return (
     <main className="fixed inset-0 overflow-clip bg-ink-950">

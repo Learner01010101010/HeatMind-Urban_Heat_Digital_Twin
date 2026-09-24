@@ -17,11 +17,10 @@ export function ProfileButton() {
   return (
     <button
       onClick={() => set({ panel: "profile" })}
-      className="press relative grid place-items-center w-11 h-11 rounded-full shrink-0"
-      style={{ background: `conic-gradient(from 140deg, ${p.accent}, #34e2c6, ${p.accent})`, padding: 2 }}
+      className="press relative grid place-items-center w-11 h-11 rounded-full shrink-0 bg-ink-900 border border-white/[0.1]"
       aria-label={`Profile · ${p.label}`}
     >
-      <span className="grid place-items-center w-full h-full rounded-full bg-ink-900" style={{ color: p.accent }}>
+      <span className="grid place-items-center w-full h-full rounded-full text-ink-200">
         <p.icon size={18} />
       </span>
     </button>
@@ -52,8 +51,11 @@ function Toggle({ on, onChange, label, hint }: { on: boolean; onChange: (v: bool
         <span className="block text-[14px] text-ink-100">{label}</span>
         <span className="block text-[12px] text-ink-400">{hint}</span>
       </span>
-      <span className={`w-12 h-7 rounded-full p-0.5 transition-colors duration-300 ${on ? "bg-cool-400" : "bg-white/10"}`}>
-        <span className={`block w-6 h-6 rounded-full bg-white shadow transition-transform duration-300 [transition-timing-function:cubic-bezier(.34,1.4,.64,1)] ${on ? "translate-x-5" : ""}`} />
+      <span className="w-12 h-7 rounded-full p-0.5 transition-colors duration-300" style={{ backgroundColor: on ? "#eef2f7" : "rgba(255,255,255,.1)" }}>
+        <span
+          className="block w-6 h-6 rounded-full shadow transition-transform duration-300 [transition-timing-function:cubic-bezier(.34,1.4,.64,1)]"
+          style={{ transform: on ? "translateX(20px)" : "none", backgroundColor: on ? "#030509" : "#fff" }}
+        />
       </span>
     </button>
   );
@@ -74,7 +76,7 @@ export function ProfilePanel() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <span className="grid place-items-center w-16 h-16 rounded-full" style={{ background: `linear-gradient(135deg, ${p.accent}33, ${p.accent}10)`, color: p.accent, boxShadow: `inset 0 0 0 1.5px ${p.accent}66` }}>
+        <span className="grid place-items-center w-16 h-16 rounded-full bg-white/[0.06] text-ink-100 border border-white/[0.12]">
           <p.icon size={28} />
         </span>
         <div>
@@ -84,13 +86,13 @@ export function ProfilePanel() {
       </div>
 
       <div className="grid grid-cols-2 gap-2.5">
-        <Link href="/passport" className="press rounded-[22px] p-4 bg-gradient-to-br from-[#ff375f]/25 to-[#ff9f0a]/10 hover:from-[#ff375f]/35">
-          <HeartPulse size={20} className="text-[#ff5e7a]" />
+        <Link href="/passport" className="press rounded-[22px] p-4 bg-white/[0.04] hover:bg-white/[0.07]">
+          <HeartPulse size={20} className="text-ink-200" />
           <div className="text-[15px] font-semibold mt-3">Heat Passport</div>
           <div className="text-[12px] text-ink-300">Your heat exposure log</div>
         </Link>
         <Link href="/about" className="press rounded-[22px] p-4 bg-white/[0.04] hover:bg-white/[0.07]">
-          <BookOpen size={20} className="text-cool-300" />
+          <BookOpen size={20} className="text-ink-200" />
           <div className="text-[15px] font-semibold mt-3">How it works</div>
           <div className="text-[12px] text-ink-300">Engines & data sources</div>
         </Link>

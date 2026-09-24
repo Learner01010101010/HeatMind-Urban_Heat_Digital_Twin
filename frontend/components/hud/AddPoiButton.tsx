@@ -12,12 +12,11 @@ export default function AddPoiButton({ compact = false }: { compact?: boolean })
   return (
     <button
       onClick={() => set({ pickMode: active ? null : "add_poi", addPoiDraft: null })}
-      className={`press glass flex items-center justify-center gap-2 rounded-full text-[14px] font-semibold ${compact ? "w-11 h-11" : "h-12 pl-3.5 pr-4"} ${active ? "glow-pulse" : ""}`}
+      className={`press glass flex items-center justify-center gap-2 rounded-full text-[14px] font-semibold ${compact ? "w-11 h-11" : "h-12 pl-3.5 pr-4"} ${active ? "glow-pulse bg-ink-100 text-ink-950" : "text-ink-200"}`}
       aria-label="Add a community water or rest point"
       aria-pressed={active}
-      style={active ? { background: "linear-gradient(135deg, rgba(56,189,248,.95), rgba(167,139,250,.9))", color: "#04140f" } : undefined}
     >
-      <Droplets size={16} className={active ? "" : "text-ink-200"} />
+      <Droplets size={16} />
       {compact ? null : active ? "Tap the map" : "Add water point"}
     </button>
   );

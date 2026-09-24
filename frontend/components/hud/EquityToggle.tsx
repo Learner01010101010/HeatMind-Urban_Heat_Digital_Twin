@@ -70,7 +70,7 @@ export default function EquityToggle({ compact = false }: { compact?: boolean })
         className={`press glass flex items-center justify-center gap-2 rounded-full text-[14px] font-semibold ${compact ? "w-11 h-11" : "h-12 pl-3.5 pr-4"}`}
         aria-label="Toggle heat vulnerability overlay"
         aria-pressed={on}
-        style={on ? { background: "linear-gradient(135deg, rgba(190,24,93,.9), rgba(221,19,103,.85))", color: "#fff" } : undefined}
+        style={on ? { background: "#dd1367", color: "#fff" } : undefined}
       >
         <Scale size={16} className={on ? "" : "text-ink-200"} />
         {compact ? null : on ? "Vulnerability on" : "Heat vulnerability"}

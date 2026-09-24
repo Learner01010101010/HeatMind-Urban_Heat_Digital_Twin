@@ -72,8 +72,7 @@ export default function AddPoiForm() {
         <button
           onClick={submit}
           disabled={busy || !name.trim()}
-          className="press w-full h-11 mt-3 rounded-full font-semibold text-[14px] text-ink-950 flex items-center justify-center gap-2 disabled:opacity-50"
-          style={{ background: done ? "linear-gradient(135deg,#34e2c6,#4cc3ff)" : "linear-gradient(135deg,#38bdf8,#a78bfa)" }}
+          className="press w-full h-11 mt-3 rounded-full font-semibold text-[14px] text-ink-950 bg-ink-100 hover:bg-white flex items-center justify-center gap-2 disabled:opacity-50"
         >
           {busy ? <Loader2 size={16} className="animate-spin" /> : done ? "Submitted for review ✓" : "Submit for review"}
         </button>

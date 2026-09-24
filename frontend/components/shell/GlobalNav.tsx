@@ -5,9 +5,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const ITEMS = [
-  { href: "/", label: "Twin", icon: MapIcon, color: "#6ff0da" },
-  { href: "/passport", label: "Heat Passport", icon: HeartPulse, color: "#ff5e7a" },
-  { href: "/planner", label: "Planner", icon: Building2, color: "#fd9d24" },
+  { href: "/", label: "Twin", icon: MapIcon },
+  { href: "/passport", label: "Heat Passport", icon: HeartPulse },
+  { href: "/planner", label: "Planner", icon: Building2 },
 ];
 
 /** Top-level navigation, visible on every screen (top pill on desktop, tab bar on phones).
@@ -30,7 +30,7 @@ export default function GlobalNav() {
               className={`press flex items-center gap-2 h-10 rounded-full px-3.5 text-[13px] font-medium transition-colors ${on ? "bg-white/[0.12] text-ink-100" : "text-ink-300 hover:text-ink-100 hover:bg-white/[0.05]"}`}
               title={it.label}
             >
-              <it.icon size={16} style={{ color: on ? it.color : undefined }} />
+              <it.icon size={16} />
               <span className="hidden xl:inline">{it.label}</span>
               {it.href === "/passport" && <span className="xl:hidden">Passport</span>}
             </Link>
@@ -45,9 +45,9 @@ export default function GlobalNav() {
         {ITEMS.map((it) => {
           const on = isOn(it.href);
           return (
-            <Link key={it.href} href={it.href} aria-current={on ? "page" : undefined} className="flex-1 flex flex-col items-center justify-center gap-1">
-              <it.icon size={20} style={{ color: on ? it.color : "#6e7a90" }} />
-              <span className={`text-[10.5px] font-medium ${on ? "text-ink-100" : "text-ink-400"}`}>{it.label}</span>
+            <Link key={it.href} href={it.href} aria-current={on ? "page" : undefined} className={`flex-1 flex flex-col items-center justify-center gap-1 ${on ? "text-ink-100" : "text-ink-400"}`}>
+              <it.icon size={20} />
+              <span className="text-[10.5px] font-medium">{it.label}</span>
             </Link>
           );
         })}

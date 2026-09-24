@@ -30,11 +30,7 @@ export default function Onboarding() {
   };
 
   return (
-    <main className="min-h-dvh relative overflow-hidden">
-      <div className="absolute inset-0 pointer-events-none" aria-hidden>
-        <div className="absolute -top-40 -right-40 w-[560px] h-[560px] rounded-full bg-heat-5/15 blur-3xl" />
-        <div className="absolute -bottom-40 -left-20 w-[520px] h-[520px] rounded-full bg-cool-400/10 blur-3xl" />
-      </div>
+    <main className="min-h-dvh relative bg-ink-950">
       <div className="relative max-w-5xl mx-auto px-5 py-10 md:py-16 grid md:grid-cols-[1fr_1.15fr] gap-10 items-start">
         <section>
           <div className="flex items-center gap-3 mb-8">
@@ -45,42 +41,42 @@ export default function Onboarding() {
             </div>
           </div>
           <h1 className="text-4xl md:text-5xl font-extrabold leading-[1.05] tracking-tight text-ink-100">
-            The same street can be <span className="bg-gradient-to-r from-heat-3 via-heat-4 to-heat-5 bg-clip-text text-transparent">10°C hotter</span> than the one next to it.
+            The same street can be 10°C hotter than the one next to it.
           </h1>
-          <p className="text-ink-300 mt-5 text-[15px] leading-relaxed max-w-md">
+          <p className="text-ink-400 mt-5 text-[15px] leading-relaxed max-w-md">
             Weather apps give one number for the whole city. HeatMind models heat street by street across the TSSM BSCOER campus in Narhe, Pune, forecasts it three hours ahead, and routes you through the shade.
           </p>
           <ul className="mt-7 space-y-3 text-[14px] text-ink-200">
             <li className="flex gap-3">
-              <Sun size={18} className="text-heat-4 shrink-0 mt-0.5" /> Live sun-angle shadow simulation from real building footprints
+              <Sun size={18} className="text-ink-400 shrink-0 mt-0.5" /> Live sun-angle shadow simulation from real building footprints
             </li>
             <li className="flex gap-3">
-              <TreePine size={18} className="text-cool-300 shrink-0 mt-0.5" /> Routes scored for <i>your</i> body, not a generic average
+              <TreePine size={18} className="text-ink-400 shrink-0 mt-0.5" /> Routes scored for <i>your</i> body, not a generic average
             </li>
             <li className="flex gap-3">
-              <ShieldCheck size={18} className="text-sky-glow shrink-0 mt-0.5" /> Every score explained in plain language
+              <ShieldCheck size={18} className="text-ink-400 shrink-0 mt-0.5" /> Every score explained in plain language
             </li>
           </ul>
         </section>
 
-        <section className="glass rounded-3xl p-5 md:p-6">
+        <section className="bg-ink-900/80 border border-white/[0.08] rounded-3xl p-5 md:p-6">
           <h2 className="font-extrabold text-lg text-ink-100">Who&apos;s heading out?</h2>
           <p className="text-[13px] text-ink-400 mb-4">Identical heat isn&apos;t equally risky for everyone. Your persona sets how the risk engine weighs each factor.</p>
           <PersonaSelector value={persona} onChange={(p) => set({ persona: p })} />
 
           <div className="mt-5 grid sm:grid-cols-2 gap-3">
-            <div className="rounded-2xl bg-ink-850 border border-white/5 p-3">
+            <div className="rounded-2xl bg-white/[0.03] border border-white/[0.07] p-3">
               <div className="text-[12px] font-bold text-ink-300 mb-2">Units</div>
-              <div className="flex rounded-xl bg-ink-900 p-1" role="radiogroup" aria-label="Temperature units">
+              <div className="flex rounded-xl bg-ink-950 p-1" role="radiogroup" aria-label="Temperature units">
                 {(["C", "F"] as const).map((u) => (
-                  <button key={u} role="radio" aria-checked={units === u} onClick={() => set({ units: u })} className={`flex-1 rounded-lg py-1.5 text-[13px] font-bold ${units === u ? "bg-ink-700 text-ink-100" : "text-ink-400"}`}>
+                  <button key={u} role="radio" aria-checked={units === u} onClick={() => set({ units: u })} className={`flex-1 rounded-lg py-1.5 text-[13px] font-bold ${units === u ? "bg-white/[0.1] text-ink-100" : "text-ink-400"}`}>
                     °{u}
                   </button>
                 ))}
               </div>
             </div>
-            <label className="rounded-2xl bg-ink-850 border border-white/5 p-3 flex items-start gap-3 cursor-pointer">
-              <input type="checkbox" checked={sample} onChange={(e) => setSample(e.target.checked)} className="mt-1 accent-teal-400 w-4 h-4" />
+            <label className="rounded-2xl bg-white/[0.03] border border-white/[0.07] p-3 flex items-start gap-3 cursor-pointer">
+              <input type="checkbox" checked={sample} onChange={(e) => setSample(e.target.checked)} className="mt-1 accent-ink-100 w-4 h-4" />
               <span>
                 <span className="block text-[13px] font-bold text-ink-100">Preload a sample week</span>
                 <span className="block text-[11.5px] text-ink-400">Fills your Heat Passport with clearly-labelled sample trips (removable).</span>
@@ -88,11 +84,11 @@ export default function Onboarding() {
             </label>
           </div>
 
-          {err && <p className="text-[12.5px] text-amber-300 mt-3">{err}</p>}
+          {err && <p className="text-[12.5px] text-ink-300 mt-3">{err}</p>}
           <button
             onClick={start}
             disabled={busy}
-            className="mt-5 w-full flex items-center justify-center gap-2 rounded-2xl bg-cool-400 hover:bg-cool-300 text-ink-950 font-extrabold py-3.5 text-[15px] transition disabled:opacity-70"
+            className="mt-5 w-full flex items-center justify-center gap-2 rounded-full bg-ink-100 hover:bg-white text-ink-950 font-semibold py-3.5 text-[15px] transition disabled:opacity-60"
           >
             {busy ? <Loader2 size={18} className="animate-spin" /> : null}
             Enter the heat twin <ArrowRight size={18} />

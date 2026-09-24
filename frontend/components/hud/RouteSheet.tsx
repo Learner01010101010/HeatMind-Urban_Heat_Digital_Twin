@@ -44,7 +44,7 @@ function Row({ r, fastest, timeMin, selected }: { r: Route; fastest: Route; time
           <span className="grid place-items-center w-[18px] h-[18px] rounded-full text-[10px] font-bold text-ink-950 shrink-0" style={{ background: r.color }}>
             {r.label.replace("Route ", "")}
           </span>
-          <span className={`text-[12.5px] font-semibold truncate ${pick ? "text-cool-gradient" : "text-ink-200"}`}>{TAG[r.tags[0]] ?? r.title}</span>
+          <span className={`text-[12.5px] font-semibold truncate ${pick ? "text-ink-100" : "text-ink-300"}`}>{TAG[r.tags[0]] ?? r.title}</span>
         </div>
         <div className="flex items-center gap-2.5 mt-1 text-[11.5px] text-ink-400 tabular">
           <span className="flex items-center gap-0.5">
@@ -125,7 +125,7 @@ export default function RouteSheet({ compare, variant }: { compare: CompareResul
           <ChevronLeft size={16} />
         </button>
       ) : (
-        <span className="grid place-items-center w-8 h-8 rounded-full shrink-0" style={{ background: `${persona.accent}22`, color: persona.accent }}>
+        <span className="grid place-items-center w-8 h-8 rounded-full shrink-0 bg-white/[0.08] text-ink-200">
           <persona.icon size={15} />
         </span>
       )}

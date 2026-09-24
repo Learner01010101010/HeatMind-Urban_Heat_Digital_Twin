@@ -19,62 +19,83 @@ function budgetColor(pct: number) {
   return "#34e2c6";
 }
 
-function SectionTitle({ children, aside }: { children: React.ReactNode; aside?: React.ReactNode }) {
+function Heading({ children, aside }: { children: React.ReactNode; aside?: React.ReactNode }) {
   return (
-    <div className="flex items-baseline justify-between mb-2.5">
-      <h2 className="text-[13px] font-semibold uppercase tracking-[0.1em] text-ink-400">{children}</h2>
+    <div className="flex items-center justify-between mb-3">
+      <h2 className="text-[17px] font-semibold text-ink-100">{children}</h2>
       {aside}
     </div>
   );
 }
 
-function Today({ data }: { data: Passport }) {
+function Stat({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div>
+      <div className="text-[20px] font-semibold tabular leading-none">{value}</div>
+      <div className="text-[12px] text-ink-400 mt-1.5">{label}</div>
+    </div>
+  );
+}
+
+function TodayRing({ data }: { data: Passport }) {
   const t = data.today;
   const budget = data.daily_budget_min;
   const used = Math.round(t.minutes_exposed);
-  const pct = (t.minutes_exposed / budget) * 100;
+  const pct = Math.min(100, (t.minutes_exposed / budget) * 100);
   const col = budgetColor(pct);
   const left = Math.max(0, budget - used);
+  const size = 116;
+  const stroke = 9;
+  const r = size / 2 - stroke;
+  const c = 2 * Math.PI * r;
 
   return (
-    <section className="glass rounded-2xl p-5">
-      <div className="flex items-baseline gap-2">
-        <span className="text-[44px] font-bold tracking-tight tabular leading-none" style={{ color: col }}>
-          {used}
-        </span>
-        <span className="text-[15px] text-ink-300">of {budget} min in danger heat</span>
+    <section className="glass rounded-3xl p-6">
+      <div className="flex items-center gap-5">
+        <div className="relative shrink-0" style={{ width: size, height: size }} role="img" aria-label={`${used} of ${budget} minutes in danger heat today`}>
+          <svg width={size} height={size} className="-rotate-90">
+            <circle cx={size / 2} cy={size / 2} r={r} stroke="rgba(255,255,255,.06)" strokeWidth={stroke} fill="none" />
+            <circle
+              cx={size / 2}
+              cy={size / 2}
+              r={r}
+              stroke={col}
+              strokeWidth={stroke}
+              fill="none"
+              strokeLinecap="round"
+              strokeDasharray={c}
+              strokeDashoffset={c * (1 - pct / 100)}
+              style={{ transition: "stroke-dashoffset .7s var(--ease-out-expo), stroke .3s", filter: `drop-shadow(0 0 8px ${col}55)` }}
+            />
+          </svg>
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <span className="text-[30px] font-bold tabular leading-none" style={{ color: col }}>
+              {used}
+            </span>
+            <span className="text-[11px] text-ink-400 mt-1">of {budget} min</span>
+          </div>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-[12px] font-medium uppercase tracking-wide text-ink-400">Today</div>
+          <p className="text-[14px] text-ink-200 mt-1 leading-relaxed">
+            {t.trips === 0
+              ? "Nothing logged yet today."
+              : pct >= 100
+                ? `${used - budget} min over your limit — keep the rest of today short and shaded.`
+                : `${left} min left before you reach today's limit.`}
+          </p>
+        </div>
       </div>
 
-      <div className="relative mt-4 h-2.5 rounded-full bg-white/[0.07] overflow-hidden">
-        <div className="h-full rounded-full transition-[width] duration-700" style={{ width: `${Math.min(100, pct)}%`, background: col }} />
+      <div className="flex gap-9 mt-6">
+        <Stat label="Trips" value={t.trips} />
+        <Stat label="In shade" value={t.pct_shaded == null ? "–" : `${Math.round(t.pct_shaded)}%`} />
+        <Stat label="Rest stops" value={t.rest_stops} />
       </div>
-      <p className="text-[13px] text-ink-300 mt-2.5">
-        {t.trips === 0
-          ? "Nothing logged today."
-          : pct >= 100
-            ? `Over today's limit by ${used - budget} min. Keep the rest of today's trips short and shaded.`
-            : `${left} min left before you reach today's limit.`}
-      </p>
-
-      <dl className="grid grid-cols-3 mt-5 pt-4 border-t hairline text-center">
-        <div>
-          <dt className="text-[11.5px] text-ink-400">Trips</dt>
-          <dd className="text-[20px] font-semibold tabular mt-0.5">{t.trips}</dd>
-        </div>
-        <div className="border-x hairline">
-          <dt className="text-[11.5px] text-ink-400">In shade</dt>
-          <dd className="text-[20px] font-semibold tabular mt-0.5">{t.pct_shaded == null ? "–" : `${Math.round(t.pct_shaded)}%`}</dd>
-        </div>
-        <div>
-          <dt className="text-[11.5px] text-ink-400">Water / rest stops</dt>
-          <dd className="text-[20px] font-semibold tabular mt-0.5">{t.rest_stops}</dd>
-        </div>
-      </dl>
 
       {t.trips === 0 && (
-        <Link href="/" className="press mt-4 flex items-center justify-between rounded-xl bg-white/[0.05] hover:bg-white/[0.08] px-4 h-12 text-[14px] font-medium">
-          Plan a trip on the map
-          <ChevronRight size={17} className="text-ink-400" />
+        <Link href="/" className="press mt-5 inline-flex items-center gap-1 text-[14px] font-medium text-cool-300">
+          Plan a trip on the map <ChevronRight size={16} />
         </Link>
       )}
     </section>
@@ -86,35 +107,32 @@ function WeekChart({ days, budget }: { days: PassportDay[]; budget: number }) {
   const budgetY = (budget / max) * 100;
   return (
     <div>
-      <div className="flex justify-end gap-4 mb-3 text-[11px] text-ink-400">
-        <span className="flex items-center gap-1.5">
-          <span className="w-4 border-t border-dashed border-white/40" /> daily limit ({budget} min)
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-sm bg-[#ef4444]" /> over limit
-        </span>
-      </div>
-      <div className="relative h-36">
-        <div className="absolute inset-x-0 border-t border-dashed border-white/25" style={{ bottom: `${budgetY}%` }} />
-        <div className="absolute inset-0 flex items-end gap-2.5">
+      <div className="relative h-32">
+        <div className="absolute inset-x-0 border-t border-dashed border-white/15" style={{ bottom: `${budgetY}%` }}>
+          <span className="absolute right-0 -top-[15px] text-[10px] text-ink-500 bg-[var(--color-ink-900)] pl-1.5">{budget}m limit</span>
+        </div>
+        <div className="absolute inset-0 flex items-end gap-3">
           {days.map((d, i) => {
             const isToday = i === days.length - 1;
             const h = d.trips ? Math.max(3, (d.minutes_exposed / max) * 100) : 0;
             return (
-              <div key={d.date} className="flex-1 h-full flex flex-col items-center justify-end" title={`${d.weekday}: ${d.minutes_exposed} min in danger heat, ${d.trips} trips`}>
-                {d.trips > 0 && <span className="text-[10.5px] text-ink-300 tabular mb-1">{Math.round(d.minutes_exposed)}</span>}
+              <div
+                key={d.date}
+                className="flex-1 h-full flex items-end"
+                title={`${d.weekday}: ${Math.round(d.minutes_exposed)} min in danger heat, ${d.trips} trip${d.trips === 1 ? "" : "s"}`}
+              >
                 <div
-                  className="w-full max-w-[28px] rounded-[4px]"
-                  style={{ height: `${h}%`, background: d.within_budget ? "#34e2c6" : "#ef4444", opacity: isToday ? 1 : 0.7 }}
+                  className="w-full rounded-t-[5px] transition-[height] duration-500"
+                  style={{ height: `${h}%`, background: d.within_budget ? "var(--color-cool-400)" : "#ef4444", opacity: isToday ? 1 : 0.55 }}
                 />
               </div>
             );
           })}
         </div>
       </div>
-      <div className="flex gap-2.5 mt-2 pt-2 border-t hairline">
+      <div className="flex gap-3 mt-2.5">
         {days.map((d, i) => (
-          <span key={d.date} className={`flex-1 text-center text-[11px] ${i === days.length - 1 ? "text-ink-100 font-semibold" : "text-ink-400"}`}>
+          <span key={d.date} className={`flex-1 text-center text-[11px] ${i === days.length - 1 ? "text-ink-100 font-semibold" : "text-ink-500"}`}>
             {i === days.length - 1 ? "Today" : d.weekday}
           </span>
         ))}
@@ -160,7 +178,7 @@ export default function PassportPage() {
 
   return (
     <main className="min-h-dvh pb-28 md:pb-16">
-      <div className="max-w-[680px] mx-auto px-4 md:px-6 py-6 space-y-7">
+      <div className="max-w-[680px] mx-auto px-4 md:px-6 py-6 space-y-6">
         <Link href="/" className="press inline-flex items-center gap-1 text-[15px] text-cool-300 font-medium">
           <ChevronLeft size={20} /> Map
         </Link>
@@ -170,7 +188,7 @@ export default function PassportPage() {
             <h1 className="text-3xl font-extrabold tracking-tight">Heat Passport</h1>
             <p className="text-[14px] text-ink-400 mt-1">{today}</p>
           </div>
-          <span className="flex items-center gap-2 rounded-full px-3 h-8 text-[13px] font-medium shrink-0" style={{ background: `${p.accent}1a`, color: p.accent }}>
+          <span className="flex items-center gap-2 rounded-full px-3 h-8 text-[13px] font-medium shrink-0 bg-white/[0.08] text-ink-200">
             <p.icon size={15} /> {p.label}
           </span>
         </header>
@@ -178,13 +196,13 @@ export default function PassportPage() {
         {err && <div className="rounded-2xl bg-red-500/10 p-4 text-red-200 text-sm">{err}</div>}
         {!data && !err && (
           <div className="space-y-3">
-            <div className="skeleton h-52 rounded-2xl" />
-            <div className="skeleton h-48 rounded-2xl" />
+            <div className="skeleton h-52 rounded-3xl" />
+            <div className="skeleton h-48 rounded-3xl" />
           </div>
         )}
 
         {data && (
-          <div className="space-y-7 fade-in">
+          <div className="space-y-6 fade-in">
             {alert && alert.level !== "none" && (
               <section className="rounded-2xl p-4 border-l-4 bg-white/[0.035]" style={{ borderColor: alert.color }} role="alert">
                 <div className="flex items-center gap-2 font-semibold text-[15px]" style={{ color: alert.color }}>
@@ -197,10 +215,7 @@ export default function PassportPage() {
               </section>
             )}
 
-            <div>
-              <SectionTitle>Today</SectionTitle>
-              <Today data={data} />
-            </div>
+            <TodayRing data={data} />
 
             {rest && rest.minutes_exposed > 0 && (
               <section className="glass rounded-2xl p-4 flex items-start gap-3">
@@ -220,35 +235,21 @@ export default function PassportPage() {
             )}
 
             <div>
-              <SectionTitle>Last 7 days</SectionTitle>
-              <section className="glass rounded-2xl p-5">
-                <p className="text-[14px] text-ink-200 mb-5">{weekSentence(data)}</p>
+              <Heading>Last 7 days</Heading>
+              <section className="glass rounded-3xl p-5">
+                <p className="text-[14px] text-ink-200 mb-6">{weekSentence(data)}</p>
                 <WeekChart days={data.days} budget={data.daily_budget_min} />
-                <dl className="grid grid-cols-2 sm:grid-cols-4 gap-y-3 mt-5 pt-4 border-t hairline text-[13px]">
-                  <div>
-                    <dt className="text-ink-400">Danger heat</dt>
-                    <dd className="font-semibold tabular">{Math.round(data.week.minutes_exposed)} min</dd>
-                  </div>
-                  <div>
-                    <dt className="text-ink-400">Shaded distance</dt>
-                    <dd className="font-semibold tabular">
-                      {data.week.shaded_km} / {data.week.distance_km} km
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-ink-400">Water / rest stops</dt>
-                    <dd className="font-semibold tabular">{data.week.rest_stops}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-ink-400">Avg. trip risk</dt>
-                    <dd className="font-semibold tabular">{data.week.trips ? `${Math.round(data.week.avg_risk)} / 100` : "–"}</dd>
-                  </div>
-                </dl>
+                <div className="flex flex-wrap gap-x-9 gap-y-4 mt-7">
+                  <Stat label="Danger heat" value={`${Math.round(data.week.minutes_exposed)} min`} />
+                  <Stat label="Shaded distance" value={`${data.week.shaded_km} / ${data.week.distance_km} km`} />
+                  <Stat label="Water / rest stops" value={data.week.rest_stops} />
+                  <Stat label="Avg. trip risk" value={data.week.trips ? `${Math.round(data.week.avg_risk)}/100` : "–"} />
+                </div>
               </section>
             </div>
 
             <div>
-              <SectionTitle
+              <Heading
                 aside={
                   data.has_sample && (
                     <button
@@ -264,44 +265,44 @@ export default function PassportPage() {
                 }
               >
                 Trip log
-              </SectionTitle>
-              <div className="glass rounded-2xl divide-y divide-white/[0.06]">
+              </Heading>
+              <div className="glass rounded-3xl divide-y divide-white/[0.05]">
                 {data.recent.length === 0 && (
                   <div className="p-5 text-[14px] text-ink-400">No trips yet. Pick a route on the map and tap “Start trip” to log it here.</div>
                 )}
                 {data.recent.map((t) => (
-                  <div key={t.id} className="flex items-center gap-3 px-4 py-3">
+                  <div key={t.id} className="flex items-center gap-3 px-4 py-3.5">
                     <div className="flex-1 min-w-0">
                       <div className="text-[14.5px] font-medium truncate">
                         {t.trip_label}
-                        {t.is_sample ? <span className="ml-2 text-[10.5px] text-ink-500">(sample)</span> : null}
+                        {t.is_sample ? <span className="ml-2 text-[10.5px] text-ink-500">sample</span> : null}
                       </div>
-                      <div className="text-[12.5px] text-ink-400 tabular">
+                      <div className="text-[12.5px] text-ink-400 tabular mt-0.5">
                         {new Date(t.logged_at).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })} · {fmtDist(t.distance_m)} ·{" "}
                         {Math.round(t.minutes_total)} min · {Math.round(t.pct_shaded)}% shade
                       </div>
                     </div>
-                    <div className="text-right shrink-0">
-                      <div className="text-[15px] font-semibold tabular" style={{ color: riskColor(t.heat_risk_score) }}>
+                    <div className="flex items-center gap-1.5 shrink-0" title="Heat risk score">
+                      <span className="w-1.5 h-1.5 rounded-full" style={{ background: riskColor(t.heat_risk_score) }} />
+                      <span className="text-[15px] font-semibold tabular" style={{ color: riskColor(t.heat_risk_score) }}>
                         {Math.round(t.heat_risk_score)}
-                      </div>
-                      <div className="text-[10.5px] text-ink-500">risk</div>
+                      </span>
                     </div>
                   </div>
                 ))}
               </div>
               {data.has_sample && (
-                <p className="text-[12px] text-ink-500 mt-2">Sample trips are generated so a new passport isn&apos;t empty. They count toward the charts until removed.</p>
+                <p className="text-[12px] text-ink-500 mt-2.5">Sample trips are generated so a new passport isn&apos;t empty. They count toward the charts until removed.</p>
               )}
             </div>
 
             <div>
-              <SectionTitle>This week&apos;s goals</SectionTitle>
-              <ul className="glass rounded-2xl divide-y divide-white/[0.06]">
+              <Heading>This week&apos;s goals</Heading>
+              <ul className="glass rounded-3xl divide-y divide-white/[0.05]">
                 {data.badges.map((b) => (
-                  <li key={b.id} className="flex items-center gap-3 px-4 py-3">
+                  <li key={b.id} className="flex items-center gap-3 px-4 py-3.5">
                     <span
-                      className={`grid place-items-center w-5 h-5 rounded-full shrink-0 ${b.earned ? "bg-cool-400 text-ink-950" : "border border-ink-500"}`}
+                      className={`grid place-items-center w-5 h-5 rounded-full shrink-0 ${b.earned ? "bg-ink-100 text-ink-950" : "border border-ink-500"}`}
                       aria-label={b.earned ? "done" : "not done"}
                     >
                       {b.earned && <Check size={13} strokeWidth={3} />}
@@ -310,11 +311,7 @@ export default function PassportPage() {
                       <div className={`text-[14px] ${b.earned ? "text-ink-100" : "text-ink-200"}`}>{b.name}</div>
                       <div className="text-[12px] text-ink-500">{b.desc}</div>
                     </div>
-                    {!b.earned && (
-                      <div className="w-16 h-1.5 rounded-full bg-white/[0.07] overflow-hidden shrink-0">
-                        <div className="h-full bg-ink-300" style={{ width: `${Math.round(b.progress * 100)}%` }} />
-                      </div>
-                    )}
+                    {!b.earned && <div className="text-[12px] text-ink-500 tabular shrink-0">{Math.round(b.progress * 100)}%</div>}
                   </li>
                 ))}
               </ul>

@@ -54,6 +54,13 @@ function newToken() {
   return `hm-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
 }
 
+// Module-scope, not component-scope: resets only on a real page load (fresh JS
+// evaluation), unlike PrefsEffect's mount effect, which the Next.js router can
+// re-run mid-session (e.g. its passive-effect "reconnect" during a transition).
+// Guards onRehydrateStorage below so it only forces `onboarded` false once per
+// real visit, instead of clobbering it back after onboarding just set it true.
+let forcedOnboardedThisLoad = false;
+
 export const usePrefs = create<Prefs>()(
   persist(
     (set) => ({
@@ -72,8 +79,28 @@ export const usePrefs = create<Prefs>()(
       // Rehydrated after mount (see PrefsEffect) so server and first client render match.
       skipHydration: true,
       onRehydrateStorage: () => (state) => {
-        if (state && !state.sessionToken) state.set({ sessionToken: newToken() });
+        if (!state) return;
+        const patch: Partial<Prefs> = state.sessionToken ? {} : { sessionToken: newToken() };
+        // Only force false once per real page load — see forcedOnboardedThisLoad above.
+        // Also self-heals browsers with an old persisted `onboarded: true` from before
+        // this became a non-persisted field.
+        if (!forcedOnboardedThisLoad) {
+          forcedOnboardedThisLoad = true;
+          patch.onboarded = false;
+        }
+        if (Object.keys(patch).length) state.set(patch);
       },
+      // `onboarded` is intentionally NOT persisted: every fresh visit starts at the
+      // onboarding screen again, even for returning sessions. Everything else (session
+      // token, persona, units, accessibility prefs) still carries over.
+      partialize: (state) => ({
+        sessionToken: state.sessionToken,
+        userId: state.userId,
+        persona: state.persona,
+        units: state.units,
+        seniorMode: state.seniorMode,
+        reduceMotion: state.reduceMotion,
+      }),
     },
   ),
 );

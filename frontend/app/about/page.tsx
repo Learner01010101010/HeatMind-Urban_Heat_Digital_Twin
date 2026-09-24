@@ -99,8 +99,8 @@ export default function About() {
               <code className="block text-[11.5px] text-ink-400 mt-3">{e.api}</code>
             </article>
           ))}
-          <article className="glass rounded-2xl p-5 bg-gradient-to-br from-heat-4/10 to-transparent">
-            <span className="grid place-items-center w-10 h-10 rounded-xl bg-heat-4/15 text-heat-4 mb-3">
+          <article className="glass rounded-2xl p-5">
+            <span className="grid place-items-center w-10 h-10 rounded-xl bg-cool-400/12 text-cool-300 mb-3">
               <RouteIcon size={19} />
             </span>
             <h2 className="font-extrabold text-ink-100">Heat-aware routing</h2>
