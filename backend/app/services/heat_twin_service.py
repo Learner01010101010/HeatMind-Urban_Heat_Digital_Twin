@@ -106,6 +106,10 @@ class Frame:
     t_surface: np.ndarray
     feels: np.ndarray
     anthro: np.ndarray
+    # Fraction of clear-sky irradiance reaching the ground, and whether that came
+    # from a measurement or from the cloud-cover model.
+    clearness: float = 1.0
+    clearness_source: str = "modelled_from_cloud"
     stats: dict = field(default_factory=dict)
 
     def encode(self) -> dict:
@@ -195,7 +199,14 @@ class HeatTwin:
         z = self.zone
         w = weather_service.at(when, scenario, temp_delta)
         elev, az = solar_position(when, *CENTER)
-        clearness = 1 - 0.75 * (w.cloud / 100) ** 3.4
+        # Clearness comes from measured shortwave irradiance where the provider gives
+        # one, and only falls back to the cloud-cover model where it does not. Cloud
+        # fraction carries no optical depth, so a hazy Pune afternoon that a satellite
+        # scores as clear can still be losing a third of its surface irradiance --
+        # which is a third of the direct beam the twin puts on a pedestrian's body.
+        # Normalising against clear-sky GHI keeps intensity on exactly the 0..1 scale
+        # the gain and solar-load coefficients below were calibrated against.
+        clearness, clearness_source = w.clearness(elev)
         intensity = clearness * max(0.0, math.sin(math.radians(elev))) ** 1.15 if elev > 0 else 0.0
         exposure, bshadow, _tree_occ = sun_exposure(z, elev, az)  # tree occlusion is folded into exposure
 
@@ -216,7 +227,8 @@ class HeatTwin:
 
         f = Frame(when, scenario, temp_delta, w, elev, az, intensity,
                   exposure.astype(np.float32), bshadow.astype(bool),
-                  t_surf.astype(np.float32), feels.astype(np.float32), anthro.astype(np.float32))
+                  t_surf.astype(np.float32), feels.astype(np.float32), anthro.astype(np.float32),
+                  clearness=clearness, clearness_source=clearness_source)
         f.stats = self._stats(f)
         return f
 
@@ -253,7 +265,9 @@ class HeatTwin:
             "time": f.when.isoformat(), "scenario": f.scenario, "temp_delta_c": f.temp_delta,
             "weather": f.weather.as_dict(),
             "sun": {"elevation_deg": round(f.elev, 1), "azimuth_deg": round(f.az, 1),
-                    "intensity": round(f.intensity, 2), "is_day": f.elev > 0},
+                    "intensity": round(f.intensity, 2), "is_day": f.elev > 0,
+                    "clearness": round(f.clearness, 3),
+                    "clearness_source": f.clearness_source},
             "stats": f.stats,
         }
 

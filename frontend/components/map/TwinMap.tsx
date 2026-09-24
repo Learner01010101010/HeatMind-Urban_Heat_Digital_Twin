@@ -177,6 +177,11 @@ export default function TwinMap() {
             "interpolate", ["linear"], ["get", "vulnerability"],
             0, "rgba(40,42,38,0)", 25, "rgba(178,166,82,.28)", 50, "rgba(232,162,56,.42)", 75, "rgba(241,108,44,.6)", 100, "rgba(223,52,44,.72)",
           ],
+          // The surface is a grid of abutting translucent squares. Antialiasing each
+          // one separately double-blends every shared edge, which drew a visible mesh
+          // of seams over the whole city — an artefact of the tiling, not a feature of
+          // the data. These polygons share exact edges, so they need no antialiasing.
+          "fill-antialias": false,
           "fill-opacity-transition": { duration: 400 },
         },
       });
@@ -376,7 +381,9 @@ export default function TwinMap() {
     const when = new Date(new Date(base).getTime() + (simOffset + timeMin) * 60_000);
     const [lat, lon] = meta.data.zone.center;
     const { elevationDeg, azimuthDeg } = solarPosition(when, lat, lon);
-    const intensity = solarIntensity(elevationDeg, nearest?.weather.cloud_pct ?? 0);
+    // Prefer the backend's measured clearness so the GPU sun and the physics that
+    // produced the temperatures cannot disagree about how bright the sky is.
+    const intensity = solarIntensity(elevationDeg, nearest?.weather.cloud_pct ?? 0, nearest?.sun?.clearness);
 
     map.setLight({
       anchor: "map",
@@ -384,7 +391,12 @@ export default function TwinMap() {
       color: elevationDeg > 0 ? "#fff1dc" : "#c9c2b4",
       intensity: elevationDeg > 0 ? 0.5 : 0.18,
     });
-    layerRef.current?.setSun({ elevationDeg, azimuthDeg, intensity });
+    layerRef.current?.setSun({
+      elevationDeg,
+      azimuthDeg,
+      intensity,
+      airC: nearest?.weather.air_c ?? 30,
+    });
   }, [ready, meta.data, base, simOffset, timeMin, nearest, layerEpoch]);
 
   // ───────── mode: Map ↔ Heat Twin ─────────

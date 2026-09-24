@@ -73,8 +73,18 @@ export function solarPosition(when: Date, lat: number, lon: number): SolarPositi
  *   clearness = 1 - 0.75 * (cloud/100)^3.4
  *   intensity = clearness * max(0, sin(elev))^1.15
  */
-export function solarIntensity(elevationDeg: number, cloudPct: number): number {
+/**
+ * Solar intensity, 0..1 on the same scale the backend physics uses.
+ *
+ * `clearness` is the fraction of clear-sky irradiance actually reaching the
+ * ground. Pass the backend's measured value whenever there is one: cloud
+ * fraction carries no optical depth, and a hazy Pune afternoon reported as 98%
+ * cloud can still be delivering 87% of clear-sky irradiance. Without it this
+ * falls back to the same cloud model the backend falls back to, so the two
+ * never disagree about how bright the sun is.
+ */
+export function solarIntensity(elevationDeg: number, cloudPct: number, clearness?: number): number {
   if (elevationDeg <= 0) return 0;
-  const clearness = 1 - 0.75 * Math.pow(cloudPct / 100, 3.4);
-  return clearness * Math.pow(Math.max(0, Math.sin(elevationDeg * RAD)), 1.15);
+  const k = clearness ?? 1 - 0.75 * Math.pow(cloudPct / 100, 3.4);
+  return k * Math.pow(Math.max(0, Math.sin(elevationDeg * RAD)), 1.15);
 }
