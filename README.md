@@ -12,8 +12,13 @@ Built from the [PRD](docs/HeatMind_AI_PRD.md). Pitch walkthrough: [docs/demo-scr
 
 Requirements: **Python 3.11+** and **Node 20+**.
 
+```bash
+# macOS / Linux, one command (checks versions, creates the venv, installs deps, starts both servers)
+./start-dev.sh
+```
+
 ```powershell
-# Windows, one command (creates the venv, installs deps, starts both servers)
+# Windows, one command
 powershell -ExecutionPolicy Bypass -File .\start-dev.ps1
 ```
 
@@ -28,11 +33,13 @@ python -m venv .venv
 
 # 2. Frontend (Next.js) on :3000, in a second terminal
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
 Open **http://localhost:3000**. The Next.js app proxies `/api/*` and `/docs` to the backend (override with `BACKEND_URL`).
+
+> **Note on Node/Turbopack:** `npm run dev` defaults to Next.js's `--webpack` bundler, not Turbopack. As of Next.js 16.3.5, Turbopack's dev-server worker has a module-resolution bug with `@tailwindcss/oxide`'s native binding that can crash the app on load (`Cannot find native binding`) even when the package is installed correctly — a known class of npm/Turbopack optional-dependency issue. Use `npm run dev:turbopack` to try Turbopack once that's fixed upstream. Also confirm `node -v` is **20.9.0 or newer** — Next.js 16 fails with an unrelated-looking error on older Node.
 
 Optional: `set ANTHROPIC_API_KEY=...` before starting the backend enables an LLM polish of the explanation text. The rule-based explanation always works and is never blocked.
 
@@ -104,7 +111,9 @@ To rebuild the zone from a fresh OSM extract: replace `backend/data/osm_raw.json
 
 ## Stack
 
-Next.js 16 (App Router) · Tailwind CSS v4 · MapLibre GL 6 · Zustand · lucide-react · Geist — FastAPI · NumPy · httpx · SQLite (PostGIS-ready schema in `backend/app/db/migrations/001_postgis.sql`).
+Next.js 16 (App Router) · Tailwind CSS v4 · MapLibre GL 6 · Zustand · lucide-react · Geist — FastAPI · NumPy · httpx · SQLite.
+
+The current build runs entirely on SQLite + in-memory rasters — that's what's actually wired up and what the demo uses. `backend/app/db/migrations/001_postgis.sql` is a draft schema for the Phase 2 city-scale migration (see Roadmap below); it is **not** applied or used by the app today.
 
 ## Roadmap
 
