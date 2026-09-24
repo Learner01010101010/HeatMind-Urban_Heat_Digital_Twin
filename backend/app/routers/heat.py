@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
-from ..services.heat_twin_service import get_twin
+from ..services.heat_twin_service import INTERVENTIONS, get_twin
 from ..services.prediction_service import parse_horizon, predict
 from .common import resolve_time
 
@@ -45,6 +45,30 @@ def heat_point(lat: float, lon: float, scenario: str = "live", time: str | None 
     tw = get_twin()
     f = tw.frame(resolve_time(scenario, time, offset_min), scenario, temp_delta)
     return tw.sample(f, lat, lon)
+
+
+@router.get("/interventions")
+def list_interventions():
+    """Catalog of intervention types the simulator supports, with their modelling caveats."""
+    return {"kinds": [{"kind": k, **v} for k, v in INTERVENTIONS.items()]}
+
+
+@router.get("/intervene")
+def simulate_intervention(lat: float, lon: float, kind: str, radius_m: float = Query(20.0, ge=5, le=60),
+                          scenario: str = "live", time: str | None = None,
+                          offset_min: int = Query(0, ge=0, le=720), temp_delta: float = 0.0):
+    """SDG 13/15 — 'what if we planted trees / cool-paved / shaded this spot?'
+
+    Re-runs the same physics-informed heat formula on a small patch around
+    (lat, lon) with the intervention applied, and reports the before/after
+    feels-like temperature and shade coverage in that patch.
+    """
+    tw = get_twin()
+    f = tw.frame(resolve_time(scenario, time, offset_min), scenario, temp_delta)
+    try:
+        return tw.simulate_intervention(f, lat, lon, kind, radius_m)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("/layers")

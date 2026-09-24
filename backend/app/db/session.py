@@ -50,6 +50,18 @@ CREATE TABLE IF NOT EXISTS passport_log (
   is_sample        INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_passport_user ON passport_log(user_id, logged_at);
+CREATE TABLE IF NOT EXISTS community_pois (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_token TEXT NOT NULL,
+  lat           REAL NOT NULL,
+  lon           REAL NOT NULL,
+  kind          TEXT NOT NULL,          -- water | rest | shade
+  name          TEXT NOT NULL,
+  note          TEXT,
+  status        TEXT NOT NULL DEFAULT 'pending',  -- pending | approved | rejected
+  submitted_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_community_pois_status ON community_pois(status);
 """
 
 _lock = threading.Lock()

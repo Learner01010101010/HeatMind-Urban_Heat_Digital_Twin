@@ -23,6 +23,24 @@ from .solar import solar_position
 from .weather import Weather, weather_service
 from .zone import Zone, get_zone
 
+INTERVENTIONS = {
+    "trees": {
+        "label": "Plant tree canopy",
+        "note": "Simulated as +canopy shade and evapotranspiration cooling in a ~20 m radius "
+                "(one to two mature trees' worth of canopy).",
+    },
+    "cool_pavement": {
+        "label": "Apply cool / reflective pavement",
+        "note": "Simulated as a lower solar-gain coefficient on road surface within the radius, "
+                "consistent with published cool-pavement surface-temperature reductions.",
+    },
+    "shade_structure": {
+        "label": "Install a shade structure",
+        "note": "Simulated as near-total sun-exposure blocking in a tight radius — a shade sail, "
+                "canopy or bus-stop-style structure at this exact spot.",
+    },
+}
+
 
 def heat_index_c(t_c: np.ndarray | float, rh: float) -> np.ndarray:
     """NOAA / Rothfusz heat index, vectorised, °C in/out."""
@@ -186,6 +204,68 @@ class HeatTwin:
             "building_shadow": bool(f.building_shadow[r, c] > 0.5), "canopy": round(float(z.canopy[r, c]), 2),
             "surface": CODE_LABEL[int(z.surface[r, c])], "traffic_heat_c": round(float(z.traffic[r, c]), 1),
             "near": self.nearest_name(r, c),
+        }
+
+    # --- Intervention simulator (SDG 13 / 15) ---------------------------
+    # "What if we planted trees / cool-paved / shaded this spot?" — reuses the
+    # exact _compute() formula on a small locally-patched neighbourhood, so the
+    # answer stays physically consistent with the rest of the twin instead of
+    # being a separate guess. Shade-structure/tree shading is approximated as a
+    # direct reduction of sun_exposure rather than a full shadow re-raymarch
+    # (cheap enough for an interactive click, and honestly labelled as such by
+    # the API description below / the frontend copy).
+    def simulate_intervention(self, f: Frame, lat: float, lon: float, kind: str, radius_m: float = 20.0) -> dict:
+        if kind not in INTERVENTIONS:
+            raise ValueError(f"unknown intervention kind: {kind}")
+        z = self.zone
+        x, y = geo.to_xy(lat, lon)
+        m = geo.disk_mask(x, y, radius_m)
+        if m is None:
+            raise ValueError("point is outside the zone")
+        rs, cs, d = m
+        wk = self.walkable[rs, cs] & ~z.building[rs, cs]
+        if not wk.any():
+            raise ValueError("no walkable ground within radius of this point")
+
+        weight = np.clip(1 - d / radius_m, 0.0, 1.0)
+        exposure = f.exposure[rs, cs].copy()
+        gain = z.gain[rs, cs].copy()
+        canopy_cooling = z.canopy_cooling[rs, cs].copy()
+
+        if kind == "trees":
+            exposure *= (1 - 0.55 * weight)
+            canopy_cooling = np.clip(canopy_cooling + 0.6 * weight, 0, 1.5)
+        elif kind == "cool_pavement":
+            road_w = weight * z.road[rs, cs]
+            gain = gain - (gain - 8.0) * road_w  # reflective coating -> lower surface gain
+        elif kind == "shade_structure":
+            exposure *= (1 - 0.85 * weight)
+
+        storage = np.where(np.isin(z.surface[rs, cs], (1, 2, 6)), gain * 0.09, 0.0)
+        t_surf = f.weather.air_c + gain * f.intensity * (0.25 + 0.75 * exposure) + storage * (1 - f.intensity)
+        t_surf = np.where(z.surface[rs, cs] == 5, f.weather.air_c - 2.0, t_surf)
+
+        hi_air = float(heat_index_c(f.weather.air_c, f.weather.rh))
+        solar_load = 5.6 * f.intensity * exposure
+        ground_rad = 0.15 * (t_surf - f.weather.air_c)
+        canyon = 1.2 * z.built_density[rs, cs]
+        cooling = 2.2 * canopy_cooling + 2.4 * z.water_cooling[rs, cs] + 0.35 * max(0.0, f.weather.wind_ms - 1.0)
+        feels_after = hi_air + solar_load + ground_rad + z.traffic[rs, cs] + canyon - cooling
+
+        before = f.feels[rs, cs]
+        before_mean = float(before[wk].mean())
+        after_mean = float(feels_after[wk].mean())
+        before_shade = float((f.exposure[rs, cs][wk] < 0.35).mean() * 100)
+        after_shade = float((exposure[wk] < 0.35).mean() * 100)
+
+        return {
+            "kind": kind, "label": INTERVENTIONS[kind]["label"], "note": INTERVENTIONS[kind]["note"],
+            "center": {"lat": lat, "lon": lon}, "radius_m": radius_m,
+            "before": {"feels_c": round(before_mean, 1), "shaded_pct": round(before_shade, 1)},
+            "after": {"feels_c": round(after_mean, 1), "shaded_pct": round(after_shade, 1)},
+            "delta_c": round(after_mean - before_mean, 1),
+            "delta_shaded_pct": round(after_shade - before_shade, 1),
+            "cells_affected": int(wk.sum()),
         }
 
     def geojson(self, f: Frame, agg: int = 3) -> dict:

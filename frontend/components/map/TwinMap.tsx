@@ -2,10 +2,11 @@
 
 import * as maplibregl from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
-import { api, type TwinLayers } from "@/lib/api";
-import { setEndpoint } from "@/lib/actions";
+import { api, type EquityIndex, type InterventionKind, type InterventionResult, type TwinLayers } from "@/lib/api";
+import { runIntervention, setEndpoint } from "@/lib/actions";
 import { useBaseTime, useFrames, useMeta, useNearestFrame, usePois, useZone } from "@/lib/hooks";
-import { fmtTemp, heatColor, heatLabel, riskColor } from "@/lib/heatColorScale";
+import { fmtDelta, fmtTemp, heatColor, heatLabel, riskColor } from "@/lib/heatColorScale";
+import { INTERVENTION_STYLE } from "@/lib/interventionStyle";
 import { POI_STYLE } from "@/lib/poiStyle";
 import { atTime, keyframes, SCENARIO, TIMELINE, useMap, usePrefs } from "@/lib/store";
 
@@ -16,6 +17,7 @@ const TWIN_LAYERS = ["shadows", "corridor-glow", "corridor-core", "hot-streets",
 maplibregl.setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
 const layerCache = new Map<string, Promise<TwinLayers>>();
 const shadowCache = new Map<string, Promise<GeoJSON.FeatureCollection>>();
+const equityCache = new Map<string, Promise<EquityIndex>>();
 
 function pinEl(color: string, letter: string) {
   const d = document.createElement("div");
@@ -28,6 +30,43 @@ function esc(s: string) {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 }
 
+function interventionEl(r: InterventionResult) {
+  const s = INTERVENTION_STYLE[r.kind];
+  const d = document.createElement("div");
+  d.className = "hm-intervene-pin";
+  d.style.setProperty("--c", s.color);
+  d.title = `${s.short}: ${r.delta_c > 0 ? "+" : ""}${r.delta_c}°C here`;
+  d.textContent = s.icon;
+  return d;
+}
+
+function interventionPopupHtml(r: InterventionResult, units: "C" | "F") {
+  const s = INTERVENTION_STYLE[r.kind];
+  const cooler = r.delta_c < 0;
+  return `
+    <div style="min-width:230px">
+      <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#9aa5b8;margin-bottom:6px">
+        <span>${s.icon}</span><span>${esc(r.label)} · ${r.radius_m|0} m radius</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:14px">
+        <div>
+          <div style="font-size:9.5px;color:#6e7a90;letter-spacing:.06em;text-transform:uppercase">Before</div>
+          <div style="font-size:22px;font-weight:700;letter-spacing:-.02em;color:${heatColor(r.before.feels_c)}">${fmtTemp(r.before.feels_c, units)}</div>
+        </div>
+        <div style="color:#4a5468;font-size:16px">→</div>
+        <div>
+          <div style="font-size:9.5px;color:#6e7a90;letter-spacing:.06em;text-transform:uppercase">After</div>
+          <div style="font-size:22px;font-weight:700;letter-spacing:-.02em;color:${heatColor(r.after.feels_c)}">${fmtTemp(r.after.feels_c, units)}</div>
+        </div>
+        <div style="margin-left:auto;text-align:right">
+          <div style="font-size:9.5px;color:#6e7a90;letter-spacing:.06em;text-transform:uppercase">Change</div>
+          <div style="font-size:18px;font-weight:700;color:${cooler ? "#4cc3ff" : "#fb8a1f"}">${fmtDelta(r.delta_c, units)}</div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:#7c8698;margin-top:8px;line-height:1.4">${esc(r.note)}</div>
+    </div>`;
+}
+
 export default function TwinMap() {
   const el = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -37,6 +76,8 @@ export default function TwinMap() {
   const odMarkers = useRef<maplibregl.Marker[]>([]);
   const chipMarkers = useRef<Map<string, maplibregl.Marker>>(new Map());
   const spotMarkers = useRef<maplibregl.Marker[]>([]);
+  const interventionMarkersRef = useRef<maplibregl.Marker[]>([]);
+  const communityMarkersRef = useRef<maplibregl.Marker[]>([]);
   const fittedFor = useRef<string | null>(null);
 
   const meta = useMeta();
@@ -55,6 +96,10 @@ export default function TwinMap() {
   const flyTo = useMap((s) => s.flyTo);
   const simOffset = useMap((s) => s.simOffsetMin);
   const tempDelta = useMap((s) => s.tempDelta);
+  const interventionResults = useMap((s) => s.interventionResults);
+  const equityOn = useMap((s) => s.equityOn);
+  const myPendingPois = useMap((s) => s.myPendingPois);
+  const [approvedPois, setApprovedPois] = useState<Awaited<ReturnType<typeof api.communityPois>> | null>(null);
   const scenario = SCENARIO;
   const units = usePrefs((s) => s.units);
   const reduceMotion = usePrefs((s) => s.reduceMotion);
@@ -120,6 +165,17 @@ export default function TwinMap() {
           "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 14, 10, 18, 40],
           "heatmap-opacity": 0.55,
           "heatmap-color": ["interpolate", ["linear"], ["heatmap-density"], 0, "rgba(0,0,0,0)", 0.3, "rgba(251,138,31,0.35)", 0.6, "rgba(239,68,68,0.65)", 1, "rgba(255,210,180,0.95)"],
+        },
+      });
+      map.addSource("equity", { type: "geojson", data: EMPTY });
+      map.addLayer({
+        id: "equity", type: "fill", source: "equity", layout: { visibility: "none" },
+        paint: {
+          "fill-color": [
+            "interpolate", ["linear"], ["get", "vulnerability"],
+            0, "rgba(30,41,59,0)", 25, "rgba(124,58,237,.28)", 50, "rgba(190,24,93,.42)", 75, "rgba(221,19,103,.6)", 100, "rgba(255,60,130,.72)",
+          ],
+          "fill-opacity-transition": { duration: 400 },
         },
       });
       map.addSource("buildings", { type: "geojson", data: EMPTY });
@@ -298,6 +354,70 @@ export default function TwinMap() {
     mk(nearest.stats.coolest, "#34e2c6", "Coolest street");
   }, [ready, mode, nearest, units]);
 
+  // ───────── intervention simulator pins (SDG 13/15) ─────────
+  useEffect(() => {
+    const map = ready;
+    interventionMarkersRef.current.forEach((m) => m.remove());
+    interventionMarkersRef.current = [];
+    if (!ready || !map) return;
+    interventionResults.forEach((r) => {
+      const m = new maplibregl.Marker({ element: interventionEl(r), anchor: "center" })
+        .setLngLat([r.center.lon, r.center.lat])
+        .setPopup(new maplibregl.Popup({ maxWidth: "280px", offset: 14 }).setHTML(interventionPopupHtml(r, units)))
+        .addTo(map);
+      interventionMarkersRef.current.push(m);
+    });
+  }, [ready, interventionResults, units]);
+
+  // ───────── heat vulnerability overlay (SDG 10) ─────────
+  useEffect(() => {
+    const map = ready;
+    if (!ready || !map) return;
+    map.setLayoutProperty("equity", "visibility", equityOn ? "visible" : "none");
+    if (!equityOn || !nearest || !base) return;
+    const key = `${scenario}|${nearest.time}|${tempDelta}`;
+    const ctrl = { dead: false };
+    if (!equityCache.has(key)) {
+      const p = api.equity({ scenario, time: nearest.time, temp_delta: tempDelta });
+      p.catch(() => equityCache.delete(key));
+      equityCache.set(key, p);
+    }
+    equityCache.get(key)!.then((d) => {
+      if (ctrl.dead || !mapRef.current) return;
+      (map.getSource("equity") as maplibregl.GeoJSONSource).setData(d.surface);
+    });
+    return () => {
+      ctrl.dead = true;
+    };
+  }, [ready, equityOn, nearest, scenario, tempDelta, base]);
+
+  // ───────── crowdsourced hydration/rest points (SDG 6) ─────────
+  useEffect(() => {
+    let dead = false;
+    api.communityPois().then((r) => !dead && setApprovedPois(r)).catch(() => {});
+    return () => {
+      dead = true;
+    };
+  }, [myPendingPois.length]);
+
+  useEffect(() => {
+    const map = ready;
+    communityMarkersRef.current.forEach((m) => m.remove());
+    communityMarkersRef.current = [];
+    if (!ready || !map) return;
+    const addMarker = (lat: number, lon: number, kind: string, name: string, pending: boolean) => {
+      const color = POI_STYLE[kind as keyof typeof POI_STYLE]?.color ?? "#38bdf8";
+      const d = document.createElement("div");
+      d.className = "hm-community-pin";
+      d.style.setProperty("--c", color);
+      if (pending) d.classList.add("pending");
+      d.title = `${esc(name)} (${kind}) — ${pending ? "pending review" : "community-verified"}`;
+      communityMarkersRef.current.push(new maplibregl.Marker({ element: d, anchor: "center" }).setLngLat([lon, lat]).addTo(map));
+    };
+    approvedPois?.features.forEach((f) => addMarker(f.geometry.coordinates[1], f.geometry.coordinates[0], f.properties.kind, f.properties.name, false));
+    myPendingPois.forEach((p) => addMarker(p.lat, p.lon, p.kind, p.name, true));
+  }, [ready, approvedPois, myPendingPois]);
+
   // ───────── POIs ─────────
   useEffect(() => {
     const map = ready;
@@ -423,8 +543,23 @@ export default function TwinMap() {
     if (!ready || !map || !base) return;
     const onClick = async (ev: maplibregl.MapMouseEvent) => {
       const st = useMap.getState();
-      if (st.pickMode) {
+      if (st.pickMode === "origin" || st.pickMode === "destination") {
         setEndpoint(st.pickMode, { lat: ev.lngLat.lat, lon: ev.lngLat.lng, label: `Pinned · ${ev.lngLat.lat.toFixed(4)}, ${ev.lngLat.lng.toFixed(4)}` });
+        return;
+      }
+      if (st.pickMode === "trees" || st.pickMode === "cool_pavement" || st.pickMode === "shade_structure") {
+        const kind = st.pickMode;
+        const popup = new maplibregl.Popup({ maxWidth: "280px", offset: 12 })
+          .setLngLat(ev.lngLat)
+          .setHTML('<div class="skeleton" style="width:220px;height:78px;border-radius:12px"></div>')
+          .addTo(map);
+        const r = await runIntervention(ev.lngLat.lat, ev.lngLat.lng, kind as InterventionKind);
+        if (r) popup.setHTML(interventionPopupHtml(r, usePrefs.getState().units));
+        else popup.setHTML('<div style="font-size:12px">Could not simulate that here — try a spot on open ground or a street.</div>');
+        return;
+      }
+      if (st.pickMode === "add_poi") {
+        useMap.getState().set({ addPoiDraft: { lat: ev.lngLat.lat, lon: ev.lngLat.lng } });
         return;
       }
       const hit = map.queryRenderedFeatures(ev.point, { layers: ["route-halo"] })[0];

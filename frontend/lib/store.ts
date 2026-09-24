@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import type { CompareResult, Persona, Scenario } from "./api";
+import type { CommunityPoiSubmitResult, CompareResult, InterventionKind, InterventionResult, Persona, Scenario } from "./api";
 
 /** Every calculation runs on live conditions at the user's current time. */
 export const SCENARIO: Scenario = "live";
@@ -117,7 +117,7 @@ export interface Endpoint {
 export type MapMode = "map" | "twin";
 export type Panel = null | "insight" | "profile";
 export type RouteView = "list" | "detail";
-export type PickMode = null | "origin" | "destination";
+export type PickMode = null | "origin" | "destination" | InterventionKind | "add_poi";
 
 interface MapState {
   mode: MapMode;
@@ -136,6 +136,11 @@ interface MapState {
   loading: boolean;
   error: string | null;
   flyTo: { lat: number; lon: number; zoom?: number; nonce: number } | null;
+  interventionResults: InterventionResult[];
+  interventionBusy: boolean;
+  equityOn: boolean;
+  addPoiDraft: { lat: number; lon: number } | null;
+  myPendingPois: CommunityPoiSubmitResult[];
   set: (p: Partial<Omit<MapState, "set">>) => void;
 }
 
@@ -156,5 +161,10 @@ export const useMap = create<MapState>()((set) => ({
   loading: false,
   error: null,
   flyTo: null,
+  interventionResults: [],
+  interventionBusy: false,
+  equityOn: false,
+  addPoiDraft: null,
+  myPendingPois: [],
   set: (p) => set(p),
 }));

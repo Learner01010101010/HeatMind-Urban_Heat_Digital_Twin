@@ -4,7 +4,10 @@ from fastapi import APIRouter, HTTPException
 
 from ..schemas import PassportLogRequest, PersonaRequest
 from ..services import passport_service as ps
+from ..services.heat_alerts import clinical_alert
+from ..services.heat_twin_service import get_twin
 from ..services.route_planner import get_planner
+from ..services.weather import base_time
 
 router = APIRouter(prefix="/api", tags=["passport & users"])
 
@@ -18,9 +21,12 @@ def set_persona(req: PersonaRequest):
 @router.get("/passport/{user_id}")
 def passport(user_id: int):
     try:
-        return ps.summary(user_id)
+        s = ps.summary(user_id)
     except KeyError as exc:
         raise HTTPException(404, "user not found") from exc
+    f = get_twin().frame(base_time(), "live")
+    s["clinical_alert"] = clinical_alert(s["persona"], f.stats["city_level_feels_c"], s["today"]["budget_used_pct"])
+    return s
 
 
 @router.post("/passport/log")

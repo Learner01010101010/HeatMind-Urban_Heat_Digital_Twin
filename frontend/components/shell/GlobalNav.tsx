@@ -1,12 +1,13 @@
 "use client";
 
-import { HeartPulse, Map as MapIcon } from "lucide-react";
+import { Building2, HeartPulse, Map as MapIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const ITEMS = [
   { href: "/", label: "Twin", icon: MapIcon, color: "#6ff0da" },
   { href: "/passport", label: "Heat Passport", icon: HeartPulse, color: "#ff5e7a" },
+  { href: "/planner", label: "Planner", icon: Building2, color: "#fd9d24" },
 ];
 
 /** Top-level navigation, visible on every screen (top pill on desktop, tab bar on phones).

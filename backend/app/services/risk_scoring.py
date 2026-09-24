@@ -46,6 +46,15 @@ PERSONAS = {
         "weights": {"duration": "Medium", "peak": "Medium", "shade": "Low", "exertion": "Medium", "rest": "Low",
                     "surface": "High"},
     },
+    "gig_worker": {
+        # SDG 10 — Pune's large delivery-rider workforce: full shifts outside, on a two-wheeler,
+        # with pay tied to trip count rather than rest. Rest-break compliance is tracked
+        # separately (see passport_service.rest_compliance) against a NIOSH-style interval.
+        "label": "Delivery Rider", "speed_ms": 6.5, "pace_factor": 1.0, "vulnerability_shift_c": 0.5,
+        "daily_budget_min": 60, "walks_shady_side": False, "rest_interval_min": 30,
+        "weights": {"duration": "Very High", "peak": "High", "shade": "Low", "exertion": "Very High",
+                    "rest": "Very High", "surface": "High"},
+    },
 }
 
 

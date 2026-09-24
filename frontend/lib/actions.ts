@@ -1,7 +1,7 @@
 "use client";
 
-import { api, ApiError } from "./api";
-import { SCENARIO, useClock, useMap, usePrefs, type Endpoint } from "./store";
+import { api, ApiError, type CommunityPoiKind, type InterventionKind, type InterventionResult } from "./api";
+import { SCENARIO, TIMELINE, useClock, useMap, usePrefs, type Endpoint } from "./store";
 
 let seq = 0;
 
@@ -77,6 +77,45 @@ export function clearTrip() {
     error: null,
     timeMin: 0,
   });
+}
+
+/** SDG 13/15 Intervention Simulator — "what if we fixed this street?" */
+export async function runIntervention(lat: number, lon: number, kind: InterventionKind): Promise<InterventionResult | null> {
+  const m = useMap.getState();
+  const base = useClock.getState().base;
+  const offset = m.simOffsetMin + TIMELINE[Math.min(TIMELINE.length - 1, Math.round(m.timeMin / 15))];
+  m.set({ interventionBusy: true });
+  try {
+    const r = await api.intervene({ lat, lon, kind, scenario: SCENARIO, time: base, offset_min: offset, temp_delta: m.tempDelta });
+    useMap.getState().set({ interventionResults: [...useMap.getState().interventionResults, r], interventionBusy: false });
+    return r;
+  } catch (e) {
+    useMap.getState().set({ interventionBusy: false, error: e instanceof ApiError ? e.message : "Could not simulate that intervention here." });
+    return null;
+  }
+}
+
+/** SDG 6 — submit a crowdsourced water/rest/shade point. Shows optimistically as "pending review". */
+export async function submitCommunityPoi(kind: CommunityPoiKind, name: string, note?: string) {
+  const m = useMap.getState();
+  const p = usePrefs.getState();
+  if (!m.addPoiDraft || !p.sessionToken) return null;
+  try {
+    const r = await api.submitCommunityPoi({ session_token: p.sessionToken, lat: m.addPoiDraft.lat, lon: m.addPoiDraft.lon, kind, name, note });
+    useMap.getState().set({ myPendingPois: [...useMap.getState().myPendingPois, r], addPoiDraft: null, pickMode: null });
+    return r;
+  } catch (e) {
+    useMap.getState().set({ error: e instanceof ApiError ? e.message : "Could not submit that point right now." });
+    return null;
+  }
+}
+
+export function cancelAddPoi() {
+  useMap.getState().set({ addPoiDraft: null, pickMode: null });
+}
+
+export function clearInterventions() {
+  useMap.getState().set({ interventionResults: [], pickMode: null });
 }
 
 export function resetSimulation() {

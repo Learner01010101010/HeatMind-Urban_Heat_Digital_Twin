@@ -213,6 +213,44 @@ html.senior {
   box-shadow: 0 0 18px var(--c, #ef4444);
 }
 
+.hm-intervene-pin {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-size: 14px;
+  line-height: 1;
+  background: rgba(8, 11, 18, 0.88);
+  border: 2px solid var(--c, #34e2c6);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--c, #34e2c6) 22%, transparent), 0 6px 14px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+  transition: transform 0.2s var(--ease-spring);
+}
+.hm-intervene-pin:hover {
+  transform: scale(1.15);
+}
+
+.hm-community-pin {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--c, #38bdf8);
+  border: 2px solid #030509;
+  box-shadow: 0 0 10px var(--c, #38bdf8);
+  cursor: pointer;
+  transition: transform 0.2s var(--ease-spring);
+}
+.hm-community-pin:hover {
+  transform: scale(1.25);
+}
+.hm-community-pin.pending {
+  background: transparent;
+  border: 2px dashed var(--c, #38bdf8);
+  box-shadow: none;
+  opacity: 0.85;
+}
+
 /* ─── range (timeline) ─── */
 input[type="range"].hm-range {
   -webkit-appearance: none;

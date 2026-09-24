@@ -12,6 +12,14 @@ const PRESETS = [
   { label: "Cool change", delta: -3 },
 ];
 
+// SDG 13 — same temp_delta mechanism as the weather presets above, but framed as
+// long-run climate scenarios rather than a short-term advisory.
+const CLIMATE_PRESETS = [
+  { label: "+1.5°C", sub: "Paris Agreement target", delta: 1.5 },
+  { label: "+2°C", sub: "Likely by ~2050", delta: 2 },
+  { label: "+3°C", sub: "Current-policy pathway", delta: 3 },
+];
+
 /** Small floating ⚡ Simulate control — spikes the temperature and re-scores everything live. */
 export default function SimulateButton({ compact = false }: { compact?: boolean }) {
   const delta = useMap((s) => s.tempDelta);
@@ -52,6 +60,19 @@ export default function SimulateButton({ compact = false }: { compact?: boolean 
                 </button>
               ))}
             </div>
+            <div className="mt-4 pt-3 border-t border-white/10">
+              <div className="text-[10.5px] font-bold uppercase tracking-wider text-emerald-400 mb-1.5">Climate scenario · SDG 13</div>
+              <p className="text-[11px] text-ink-400 mb-2 leading-snug">Same twin, warmed by an IPCC-style pathway instead of a one-off weather event.</p>
+              <div className="flex gap-1.5">
+                {CLIMATE_PRESETS.map((p) => (
+                  <button key={p.label} onClick={() => apply(p.delta)} className="press flex-1 rounded-2xl bg-emerald-400/[0.08] hover:bg-emerald-400/[0.15] px-2 py-2 text-center">
+                    <div className="text-[13px] font-semibold tabular text-emerald-300">{p.label}</div>
+                    <div className="text-[9.5px] text-ink-400 leading-tight">{p.sub}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="flex gap-2 mt-3">
               <button
                 onClick={() => apply(d)}

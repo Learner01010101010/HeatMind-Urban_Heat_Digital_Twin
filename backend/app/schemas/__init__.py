@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-Persona = Literal["student", "worker", "senior", "cyclist"]
+Persona = Literal["student", "worker", "senior", "cyclist", "gig_worker"]
 Scenario = Literal["demo", "live"]
 
 
@@ -39,6 +39,19 @@ class PersonaRequest(BaseModel):
     session_token: str = Field(..., min_length=8, max_length=128)
     persona: Persona
     seed_sample: bool = False
+
+
+class CommunityPoiRequest(BaseModel):
+    session_token: str = Field(..., min_length=8, max_length=128)
+    lat: float = Field(..., ge=-90, le=90)
+    lon: float = Field(..., ge=-180, le=180)
+    kind: Literal["water", "rest", "shade"]
+    name: str = Field(..., min_length=1, max_length=80)
+    note: str | None = Field(None, max_length=280)
+
+
+class ModerateRequest(BaseModel):
+    action: Literal["approve", "reject"]
 
 
 class PassportLogRequest(BaseModel):

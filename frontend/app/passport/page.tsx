@@ -1,6 +1,6 @@
 "use client";
 
-import { Award, ChevronLeft, ChevronRight, Clock3, Droplets, Flame, Footprints, Gauge, Route as RouteIcon, Sparkles, Sun, TreePine, Trash2 } from "lucide-react";
+import { Award, ChevronLeft, ChevronRight, Clock3, Droplets, Flame, Footprints, Gauge, HeartPulse, Package, Route as RouteIcon, Sparkles, Sun, TreePine, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, type Passport, type PassportDay } from "@/lib/api";
@@ -174,6 +174,63 @@ export default function PassportPage() {
 
         {data && (
           <div className="space-y-8 fade-in">
+            {/* clinical heat alert — SDG 3 */}
+            {data.clinical_alert.level !== "none" && (
+              <section
+                className="rounded-[26px] p-5 flex gap-3.5 items-start"
+                style={{ background: `${data.clinical_alert.color}14`, boxShadow: `inset 0 0 0 1.5px ${data.clinical_alert.color}55` }}
+                role="alert"
+              >
+                <span className="grid place-items-center w-11 h-11 rounded-full shrink-0" style={{ background: `${data.clinical_alert.color}22`, color: data.clinical_alert.color }}>
+                  <HeartPulse size={20} />
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-[16px] font-bold" style={{ color: data.clinical_alert.color }}>
+                      {data.clinical_alert.label}
+                    </h2>
+                    <span className="text-[11px] text-ink-400 tabular">
+                      {data.clinical_alert.persona_adjusted_feels_c}°C persona-adjusted
+                    </span>
+                  </div>
+                  <p className="text-[13px] text-ink-200 mt-1 leading-relaxed">{data.clinical_alert.advice}</p>
+                  <p className="text-[10.5px] text-ink-500 mt-2">{data.clinical_alert.source}</p>
+                </div>
+              </section>
+            )}
+
+            {/* rest-break compliance — SDG 10, Delivery Rider persona */}
+            {data.rest_compliance && (
+              <section
+                className="rounded-[26px] p-5 flex gap-3.5 items-start"
+                style={{
+                  background: data.rest_compliance.compliant ? "rgba(52,226,198,.08)" : "rgba(221,19,103,.1)",
+                  boxShadow: `inset 0 0 0 1.5px ${data.rest_compliance.compliant ? "#34e2c655" : "#dd136755"}`,
+                }}
+              >
+                <span
+                  className="grid place-items-center w-11 h-11 rounded-full shrink-0"
+                  style={{ background: data.rest_compliance.compliant ? "#34e2c622" : "#dd136722", color: data.rest_compliance.compliant ? "#34e2c6" : "#dd1367" }}
+                >
+                  <Package size={20} />
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-[16px] font-bold" style={{ color: data.rest_compliance.compliant ? "#34e2c6" : "#dd1367" }}>
+                      Rest-break compliance · SDG 10
+                    </h2>
+                    <span className="text-[11px] text-ink-400 tabular">
+                      {data.rest_compliance.breaks_taken}/{data.rest_compliance.breaks_required} breaks
+                    </span>
+                  </div>
+                  <p className="text-[13px] text-ink-200 mt-1 leading-relaxed">{data.rest_compliance.message}</p>
+                  <p className="text-[10.5px] text-ink-500 mt-2">
+                    Recommended: one rest/shade stop every {data.rest_compliance.interval_min} minutes of heat exposure — {data.rest_compliance.minutes_exposed} min exposed today.
+                  </p>
+                </div>
+              </section>
+            )}
+
             {/* heat rings */}
             <section>
               <h2 className="text-[22px] font-bold tracking-tight mb-3">Heat Rings</h2>

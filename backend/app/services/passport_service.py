@@ -165,4 +165,25 @@ def summary(user_id: int) -> dict:
         "has_sample": any(r["is_sample"] for r in rows),
         "recent": [{k: r[k] for k in ("id", "logged_at", "trip_label", "minutes_total", "minutes_exposed", "pct_shaded",
                                       "distance_m", "heat_risk_score", "rest_stops_taken", "is_sample")} for r in rows[:12]],
+        "rest_compliance": rest_compliance(persona, today_row),
+    }
+
+
+def rest_compliance(persona: str, today: dict) -> dict | None:
+    """SDG 10 — gig/delivery-worker rest-break compliance against a NIOSH-style
+    fixed rest interval during heat exposure (not a live GPS timer — computed
+    from today's logged exposure and rest stops, same data the rings use)."""
+    interval = PERSONAS.get(persona, {}).get("rest_interval_min")
+    if not interval:
+        return None
+    exposed = today["minutes_exposed"]
+    taken = today["rest_stops"]
+    required = int(exposed // interval)
+    compliant = taken >= required
+    behind = max(0, required - taken)
+    return {
+        "applies": True, "interval_min": interval, "minutes_exposed": exposed,
+        "breaks_required": required, "breaks_taken": taken, "compliant": compliant,
+        "message": ("On track — rest breaks match the recommended interval." if compliant
+                    else f"{behind} rest break{'s' if behind != 1 else ''} behind schedule for a {interval}-minute heat rest interval."),
     }

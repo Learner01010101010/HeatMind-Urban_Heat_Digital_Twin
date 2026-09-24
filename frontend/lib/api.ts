@@ -1,6 +1,6 @@
 // Typed fetch wrappers for the HeatMind FastAPI backend (proxied at /api via next.config rewrites).
 
-export type Persona = "student" | "worker" | "senior" | "cyclist";
+export type Persona = "student" | "worker" | "senior" | "cyclist" | "gig_worker";
 export type Scenario = "demo" | "live";
 
 export interface Weather {
@@ -249,6 +249,114 @@ export interface Passport {
   badges: { id: string; name: string; desc: string; earned: boolean; progress: number }[];
   has_sample: boolean;
   recent: { id: number; logged_at: string; trip_label: string; minutes_total: number; minutes_exposed: number; pct_shaded: number; distance_m: number; heat_risk_score: number; rest_stops_taken: number; is_sample: number }[];
+  clinical_alert: ClinicalAlert;
+  rest_compliance: RestCompliance | null;
+}
+
+export interface RestCompliance {
+  applies: true;
+  interval_min: number;
+  minutes_exposed: number;
+  breaks_required: number;
+  breaks_taken: number;
+  compliant: boolean;
+  message: string;
+}
+
+export type AlertLevel = "none" | "caution" | "warning" | "danger" | "emergency";
+
+export interface ClinicalAlert {
+  level: AlertLevel;
+  label: string;
+  color: string;
+  advice: string;
+  feels_c: number;
+  persona_adjusted_feels_c: number;
+  budget_used_pct: number;
+  thresholds_c: { caution: number; danger: number; extreme: number };
+  source: string;
+}
+
+export interface OpenDataset {
+  id: string;
+  title: string;
+  format: string;
+  endpoint: string;
+  provenance: string;
+  status: "real" | "mixed" | "estimated" | "modelled";
+  description: string;
+}
+
+export interface OpenDataCatalog {
+  license: string;
+  docs: string;
+  datasets: OpenDataset[];
+}
+
+export type CommunityPoiKind = "water" | "rest" | "shade";
+
+export interface CommunityPoiSubmitResult {
+  id: number;
+  status: "pending";
+  kind: CommunityPoiKind;
+  name: string;
+  lat: number;
+  lon: number;
+}
+
+export type InterventionKind = "trees" | "cool_pavement" | "shade_structure";
+
+export interface InterventionInfo {
+  kind: InterventionKind;
+  label: string;
+  note: string;
+}
+
+export interface InterventionResult {
+  kind: InterventionKind;
+  label: string;
+  note: string;
+  center: { lat: number; lon: number };
+  radius_m: number;
+  before: { feels_c: number; shaded_pct: number };
+  after: { feels_c: number; shaded_pct: number };
+  delta_c: number;
+  delta_shaded_pct: number;
+  cells_affected: number;
+}
+
+export interface PlannerStreet {
+  name: string;
+  highway: string;
+  length_m: number;
+  mean_feels_c: number;
+  shaded_pct: number;
+  priority_score: number;
+  sample: { lat: number; lon: number };
+}
+
+export interface PlannerReport {
+  generated_at: string;
+  scenario: Scenario;
+  weather: Weather;
+  city_stats: TwinStats;
+  methodology: string;
+  streets: PlannerStreet[];
+}
+
+export interface EquitySummary {
+  mean: number;
+  p90: number;
+  pct_high: number;
+  weights: { heat: number; cooling_deficit: number; access_deficit: number };
+  n_pois: number;
+  note: string;
+}
+
+export interface EquityIndex {
+  summary: EquitySummary;
+  surface: GeoJSON.FeatureCollection<GeoJSON.Polygon, { vulnerability: number }>;
+  methodology: string;
 }
 
 export interface TwinLayers {
@@ -303,6 +411,25 @@ export const api = {
     ),
   layers: (p: { scenario: Scenario; time?: string; offset_min?: number; temp_delta?: number }, signal?: AbortSignal) =>
     req<TwinLayers>(`/api/heat/layers?${qs(p)}`, { signal }),
+  interventions: () => req<{ kinds: InterventionInfo[] }>("/api/heat/interventions"),
+  equity: (p: { scenario: Scenario; time?: string; offset_min?: number; temp_delta?: number }, signal?: AbortSignal) =>
+    req<EquityIndex>(`/api/equity/index?${qs(p)}`, { signal }),
+  plannerReport: (p: { scenario: Scenario; time?: string; offset_min?: number; temp_delta?: number; top_n?: number }) =>
+    req<PlannerReport>(`/api/planner/report?${qs(p)}`),
+  submitCommunityPoi: (body: { session_token: string; lat: number; lon: number; kind: CommunityPoiKind; name: string; note?: string }) =>
+    req<CommunityPoiSubmitResult>("/api/community/pois", { method: "POST", json: body }),
+  communityPois: () => req<GeoJSON.FeatureCollection<GeoJSON.Point, { kind: CommunityPoiKind; name: string; status: string; source: "community" }>>("/api/community/pois?status=approved"),
+  openDataCatalog: () => req<OpenDataCatalog>("/api/open-data"),
+  intervene: (p: {
+    lat: number;
+    lon: number;
+    kind: InterventionKind;
+    radius_m?: number;
+    scenario: Scenario;
+    time?: string;
+    offset_min?: number;
+    temp_delta?: number;
+  }) => req<InterventionResult>(`/api/heat/intervene?${qs(p)}`),
   pois: () => req<GeoJSON.FeatureCollection<GeoJSON.Point, Poi>>("/api/pois"),
   compare: (body: {
     origin: { lat: number; lon: number };
