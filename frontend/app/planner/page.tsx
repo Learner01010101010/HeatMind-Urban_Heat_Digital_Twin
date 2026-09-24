@@ -53,7 +53,7 @@ export default function PlannerPage() {
             </div>
             <h1 className="text-3xl md:text-4xl font-extrabold text-ink-100 tracking-tight">Heat Action Brief</h1>
             <p className="text-ink-300 mt-2 max-w-2xl">
-              {meta.data?.zone.name ?? "TSSM BSCOER Campus"} — streets ranked by pedestrian heat-exposure priority, generated from the live digital twin.
+              {meta.data?.zone.name ?? "South Pune"} — streets ranked by pedestrian heat-exposure priority, generated from the live digital twin.
               {report && <> Generated {new Date(report.generated_at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}.</>}
             </p>
           </div>

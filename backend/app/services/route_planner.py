@@ -16,7 +16,9 @@ from .risk_scoring import CAUTION_C, PERSONAS, score_route
 from .routing_service import Path, StreetGraph
 from .zone import CODE_LABEL
 
-ROUTE_COLORS = ["#38bdf8", "#a78bfa", "#f472b6", "#facc15"]
+# Four separable route accents, none of them blue and none of them borrowed from
+# the heat ramp, so a route chip can never be misread as a temperature.
+ROUTE_COLORS = ["#6fbf5e", "#f472b6", "#f0abfc", "#d8c65a"]
 POI_RADIUS_M = 45.0
 SEGMENT_M = 24.0
 

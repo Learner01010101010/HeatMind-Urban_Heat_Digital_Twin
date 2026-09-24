@@ -50,7 +50,7 @@ export default function HeatProfileChart({ route, timeMin, units }: { route: Rou
         </mask>
       </defs>
       {[lo, hi].map((t) => (
-        <text key={t} x={pad.l - 6} y={y(t) + 3} textAnchor="end" fontSize="9" fill="#6e7a90" className="tabular">
+        <text key={t} x={pad.l - 6} y={y(t) + 3} textAnchor="end" fontSize="9" fill="#858179" className="tabular">
           {fmtTemp(t, units).replace(/°[CF]/, "°")}
         </text>
       ))}

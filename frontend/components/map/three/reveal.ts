@@ -22,6 +22,16 @@ import type { TwinFields } from "./fields";
 export const REVEAL_RADIUS_M = 220;
 /** Additional metres over which the reveal fades out to nothing. */
 export const REVEAL_FEATHER_M = 140;
+/**
+ * Half-width of the band revealed either side of a planned route.
+ *
+ * Wide enough to carry the street's own context -- the buildings that actually
+ * shade it, the canopy along it, the junctions it passes -- without paying to
+ * draw a city the trip never goes near. With the feather this is a ~600 m
+ * corridor, which over a Narhe-to-Swargate route is roughly a tenth of the cells
+ * the full zone would cost.
+ */
+export const ROUTE_CORRIDOR_M = 170;
 
 export class RevealField {
   readonly texture: THREE.DataTexture;
@@ -50,6 +60,17 @@ export class RevealField {
     this.texture.needsUpdate = true;
   }
 
+  /** Write one cell, keeping the maximum. Returns true if it changed. */
+  private poke(r: number, c: number, d: number, radiusM: number): boolean {
+    const v = d <= radiusM ? 1 : 1 - (d - radiusM) / REVEAL_FEATHER_M;
+    const byte = Math.round(Math.max(0, Math.min(1, v)) * 255);
+    const i = r * this.cols + c;
+    if (byte <= this.data[i]) return false;
+    if (this.data[i] < 128 && byte >= 128) this.revealedCells++;
+    this.data[i] = byte;
+    return true;
+  }
+
   /** Paint a fix at lat/lon. Returns true when anything new became visible. */
   addFix(lat: number, lon: number, radiusM = REVEAL_RADIUS_M): boolean {
     const [x, y] = this.fields.origin.toXY(lat, lon);
@@ -68,14 +89,54 @@ export class RevealField {
       for (let c = c0; c <= c1; c++) {
         const cx = (c + 0.5) * this.cellM;
         const d = Math.hypot(cx - x, cy - y);
-        if (d > outer) continue;
-        const v = d <= radiusM ? 1 : 1 - (d - radiusM) / REVEAL_FEATHER_M;
-        const byte = Math.round(Math.max(0, Math.min(1, v)) * 255);
-        const i = r * this.cols + c;
-        if (byte > this.data[i]) {
-          if (this.data[i] < 128 && byte >= 128) this.revealedCells++;
-          this.data[i] = byte;
-          changed = true;
+        if (d <= outer && this.poke(r, c, d, radiusM)) changed = true;
+      }
+    }
+    if (changed) this.texture.needsUpdate = true;
+    return changed;
+  }
+
+  /**
+   * Reveal a corridor along a planned route.
+   *
+   * Distance is measured to the nearest *segment*, not to stamped discs along it:
+   * a route across open ground has vertices hundreds of metres apart, and disc
+   * stamping would leave the corridor scalloped between them. Only the cells in
+   * each segment's own expanded bbox are visited, so cost tracks the route's
+   * length rather than the size of the zone -- which is what makes this affordable
+   * once the zone is the whole Narhe-to-Swargate corridor.
+   */
+  addPath(coords: [number, number][], radiusM = ROUTE_CORRIDOR_M): boolean {
+    if (coords.length === 0) return false;
+    if (coords.length === 1) return this.addFix(coords[0][0], coords[0][1], radiusM);
+
+    const outer = radiusM + REVEAL_FEATHER_M;
+    let changed = false;
+
+    for (let k = 0; k < coords.length - 1; k++) {
+      const [ax, ay] = this.fields.origin.toXY(coords[k][0], coords[k][1]);
+      const [bx, by] = this.fields.origin.toXY(coords[k + 1][0], coords[k + 1][1]);
+
+      const c0 = Math.max(0, Math.floor((Math.min(ax, bx) - outer) / this.cellM));
+      const c1 = Math.min(this.cols - 1, Math.ceil((Math.max(ax, bx) + outer) / this.cellM));
+      const r0 = Math.max(0, Math.floor((Math.min(ay, by) - outer) / this.cellM));
+      const r1 = Math.min(this.rows - 1, Math.ceil((Math.max(ay, by) + outer) / this.cellM));
+      if (c0 > c1 || r0 > r1) continue; // this leg lies outside the zone
+
+      const dx = bx - ax;
+      const dy = by - ay;
+      const len2 = dx * dx + dy * dy;
+
+      for (let r = r0; r <= r1; r++) {
+        const cy = (r + 0.5) * this.cellM;
+        for (let c = c0; c <= c1; c++) {
+          const cx = (c + 0.5) * this.cellM;
+          // clamped projection onto the segment
+          const t = len2 > 0
+            ? Math.max(0, Math.min(1, ((cx - ax) * dx + (cy - ay) * dy) / len2))
+            : 0;
+          const d = Math.hypot(cx - (ax + t * dx), cy - (ay + t * dy));
+          if (d <= outer && this.poke(r, c, d, radiusM)) changed = true;
         }
       }
     }

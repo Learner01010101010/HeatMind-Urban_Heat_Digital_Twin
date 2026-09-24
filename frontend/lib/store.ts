@@ -163,6 +163,16 @@ interface MapState {
   loading: boolean;
   error: string | null;
   flyTo: { lat: number; lon: number; zoom?: number; nonce: number } | null;
+  /**
+   * Where the twin should build itself when the map first opens.
+   *
+   * Onboarding resolves this before letting anyone through -- from a real position
+   * fix where possible, otherwise from a start the user picks explicitly. The map
+   * has no other opinion about where to render: without this it draws nothing,
+   * which is the point. The zone spans Narhe to Swargate and only the streets
+   * around the user are worth building.
+   */
+  startAt: { lat: number; lon: number; label: string } | null;
   interventionResults: InterventionResult[];
   interventionBusy: boolean;
   equityOn: boolean;
@@ -190,10 +200,13 @@ export const useMap = create<MapState>()((set) => ({
   loading: false,
   error: null,
   flyTo: null,
+  startAt: null,
   interventionResults: [],
   interventionBusy: false,
   equityOn: false,
-  revealOn: false,
+  // Corridor-first: the twin draws where you are and where you are going, not the
+  // whole zone. MyLocation still offers "Show whole zone" to override it.
+  revealOn: true,
   addPoiDraft: null,
   myPendingPois: [],
   set: (p) => set(p),

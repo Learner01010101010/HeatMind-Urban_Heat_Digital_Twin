@@ -55,7 +55,7 @@ function Row({ r, fastest, timeMin, selected }: { r: Route; fastest: Route; time
             <Droplets size={11} className="text-sky-glow" />
             {water}
           </span>
-          <span className="flex items-center gap-0.5" style={{ color: isFastest ? undefined : red > 0.5 ? "#6ff0da" : "#fca5a5" }}>
+          <span className="flex items-center gap-0.5" style={{ color: isFastest ? undefined : red > 0.5 ? "#9dc06a" : "#fca5a5" }}>
             <Sun size={11} className="text-heat-4" />
             {isFastest ? "base" : `${red > 0 ? "−" : "+"}${Math.abs(Math.round(red))}%`}
           </span>

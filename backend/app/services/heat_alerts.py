@@ -12,7 +12,7 @@ from .risk_scoring import CAUTION_C, DANGER_C, EXTREME_C, PERSONAS
 
 LEVELS = {
     "none": {
-        "label": "No heat alert", "color": "#34e2c6",
+        "label": "No heat alert", "color": "#6fbf5e",
         "advice": "Conditions are within a normal range for outdoor activity.",
     },
     "caution": {

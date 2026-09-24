@@ -77,7 +77,7 @@ void main() {
   col *= ao;
 
   float shadow = texture2D(uExposure, vUv).g;
-  col = mix(col, col * 0.82 + vec3(0.012, 0.035, 0.085), shadow * uShadeStrength);
+  col = mix(col, col * 0.82 + vec3(0.050, 0.044, 0.036), shadow * uShadeStrength);
 
   // --- soft boundary so the twin does not end in a hard rectangle -----------
   vec2 cell = vUv * uGrid;

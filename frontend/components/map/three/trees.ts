@@ -89,9 +89,16 @@ void main() {
   // own green gets multiplied toward teal-gray in anything but full direct sun.
   vec3 col = base * (vec3(0.30, 0.36, 0.34) * ambient + uSunColor * direct);
   // freshly planted canopy carries the intervention accent while it grows in
-  col = mix(col, col * 0.7 + vec3(0.10, 0.62, 0.52) * 0.55, vPlanted * 0.55);
+  col = mix(col, col * 0.7 + vec3(0.30, 0.74, 0.32) * 0.55, vPlanted * 0.55);
 
-  col *= mix(0.05, 1.0, revealAt(uv));
+  // Outside the revealed corridor this geometry is not drawn at all. Dimming it
+  // instead (which is what the old 0.05 multiplier did) still rasterises opaque
+  // black over the basemap, so undiscovered ground came out as a dark silhouette
+  // of the city rather than as undiscovered ground. revealAt() returns 1.0 when
+  // reveal is switched off, so the whole-zone view is untouched by this.
+  float rv = revealAt(uv);
+  if (rv < 0.15) discard;
+  col *= mix(0.55, 1.0, rv);
 
   gl_FragColor = vec4(col, 1.0);
 }`;

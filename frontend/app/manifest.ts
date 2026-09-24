@@ -4,7 +4,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "HeatMind AI — Urban Heat Digital Twin",
     short_name: "HeatMind",
-    description: "Street-by-street heat, 2-hour forecasts and heat-safe routes for the TSSM BSCOER campus, Pune.",
+    description: "Street-by-street heat, 2-hour forecasts and heat-safe routes across south Pune, Narhe to Swargate.",
     start_url: "/",
     display: "standalone",
     background_color: "#05080e",

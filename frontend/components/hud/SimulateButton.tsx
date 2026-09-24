@@ -44,7 +44,7 @@ export default function SimulateButton({ compact = false }: { compact?: boolean 
           <div className={`glass-strong absolute right-0 z-20 w-[290px] ${compact ? "top-full mt-3" : "bottom-full mb-3"} rounded-[26px] p-4 pop-in`} role="dialog" aria-label="Simulate conditions">
             <div className="flex items-baseline justify-between mb-1">
               <div className="text-[15px] font-semibold text-ink-100 tracking-tight">What if it gets hotter?</div>
-              <div className="text-[22px] font-semibold tabular tracking-tight" style={{ color: d > 0 ? "#fb8a1f" : d < 0 ? "#4cc3ff" : "#eef2f7" }}>
+              <div className="text-[22px] font-semibold tabular tracking-tight" style={{ color: d > 0 ? "#fb8a1f" : d < 0 ? "#9dc06a" : "#f3f3f2" }}>
                 {fmtDelta(d, units, 0)}
               </div>
             </div>
@@ -53,7 +53,7 @@ export default function SimulateButton({ compact = false }: { compact?: boolean 
             <div className="flex gap-1.5 mt-4">
               {PRESETS.map((p) => (
                 <button key={p.label} onClick={() => apply(p.delta)} className="press flex-1 rounded-2xl bg-white/[0.05] hover:bg-white/[0.1] px-2 py-2 text-center">
-                  <div className="text-[13px] font-semibold tabular" style={{ color: p.delta > 0 ? "#fb8a1f" : "#4cc3ff" }}>
+                  <div className="text-[13px] font-semibold tabular" style={{ color: p.delta > 0 ? "#fb8a1f" : "#9dc06a" }}>
                     {fmtDelta(p.delta, units, 0)}
                   </div>
                   <div className="text-[10.5px] text-ink-400 leading-tight">{p.label}</div>

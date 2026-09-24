@@ -42,7 +42,7 @@ const CLASS_TONE = [
   0.20, 0.195, 0.19, // service
   0.40, 0.37, 0.32, // footway — light paving, warm beige
   0.28, 0.22, 0.16, // track — dirt, brown
-  0.16, 0.22, 0.27, // cycleway — cool blue-teal
+  0.17, 0.26, 0.19, // cycleway — moss green
 ];
 const HAS_CENTRELINE = [1, 1, 1, 1, 0, 0, 0, 0, 0];
 
@@ -106,9 +106,16 @@ void main() {
   float ambient = mix(0.34, 0.62, pow(clamp(svf, 0.0, 1.0), 1.5));
   float direct = uSunIntensity * (1.0 - 0.8 * shadow);
   col *= ambient + 0.55 * direct * 0.35;
-  col = mix(col, col * 0.78 + vec3(0.01, 0.025, 0.06), shadow * 0.6);
+  col = mix(col, col * 0.78 + vec3(0.036, 0.031, 0.025), shadow * 0.6);
 
-  col *= mix(0.05, 1.0, revealAt(uv));
+  // Outside the revealed corridor this geometry is not drawn at all. Dimming it
+  // instead (which is what the old 0.05 multiplier did) still rasterises opaque
+  // black over the basemap, so undiscovered ground came out as a dark silhouette
+  // of the city rather than as undiscovered ground. revealAt() returns 1.0 when
+  // reveal is switched off, so the whole-zone view is untouched by this.
+  float rv = revealAt(uv);
+  if (rv < 0.15) discard;
+  col *= mix(0.55, 1.0, rv);
 
   gl_FragColor = vec4(col, 1.0);
 }`;
