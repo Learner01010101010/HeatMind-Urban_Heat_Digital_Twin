@@ -1,0 +1,221 @@
+"use client";
+
+import * as THREE from "three";
+import type { TwinFields } from "./fields";
+import { REVEAL_GLSL } from "./reveal";
+
+/**
+ * Canopy and trunks as two InstancedMeshes (two draw calls for the whole zone).
+ *
+ * Every instance comes from the zone's own tree records — the same `radius_m` and
+ * `density` the heat model uses for shade and evapotranspiration — so a big dense
+ * tree on screen is a big dense tree in the physics. Nothing here is scattered for
+ * decoration.
+ *
+ * Capacity is over-allocated so the intervention simulator can plant new canopy at
+ * run time without rebuilding the buffers: `setPlanted()` appends instances past the
+ * base tree count and the sun-exposure pass picks them up on its next march.
+ */
+
+const SLACK = 256; // room for interventions planted during the session
+
+const CANOPY_VERT = `
+attribute float aRadius;
+attribute float aDensity;
+attribute float aSeed;
+attribute float aPlanted;
+
+varying vec3 vNormal;
+varying vec2 vGround;
+varying float vDensity;
+varying float vSeed;
+varying float vPlanted;
+
+uniform float uPlantGrow;
+
+void main() {
+  vDensity = aDensity;
+  vSeed = aSeed;
+  vPlanted = aPlanted;
+
+  float grow = mix(1.0, uPlantGrow, aPlanted);
+  vec3 local = position * aRadius * grow;
+  // squash slightly so canopies read as crowns rather than beach balls
+  local.z *= 0.78;
+
+  vec4 world = instanceMatrix * vec4(local, 1.0);
+  vGround = world.xy;
+  vNormal = normalize(mat3(instanceMatrix) * normal);
+  gl_Position = projectionMatrix * modelViewMatrix * world;
+}`;
+
+const CANOPY_FRAG = `
+precision highp float;
+
+varying vec3 vNormal;
+varying vec2 vGround;
+varying float vDensity;
+varying float vSeed;
+varying float vPlanted;
+
+uniform sampler2D uExposure;
+uniform sampler2D uSvf;
+uniform vec2 uExtent;
+uniform vec3 uSunDir;
+uniform vec3 uSunColor;
+uniform float uSunIntensity;
+${REVEAL_GLSL}
+
+float hash(float n) { return fract(sin(n * 43758.5453) * 12345.6789); }
+
+void main() {
+  vec2 uv = clamp(vGround / uExtent, 0.0, 1.0);
+  float svf = texture2D(uSvf, uv).r;
+  float shadow = texture2D(uExposure, uv).g;
+
+  // denser canopy reads darker and cooler; seed shifts the hue a little per tree
+  float h = hash(vSeed);
+  vec3 base = mix(vec3(0.20, 0.34, 0.17), vec3(0.11, 0.24, 0.12), vDensity);
+  base *= 0.82 + 0.34 * h;
+
+  float ndl = max(dot(normalize(vNormal), uSunDir), 0.0);
+  float direct = ndl * uSunIntensity * (1.0 - 0.7 * shadow);
+  float ambient = mix(0.26, 0.46, pow(clamp(svf, 0.0, 1.0), 1.4));
+
+  vec3 col = base * (vec3(0.22, 0.29, 0.38) * ambient + uSunColor * direct);
+  // freshly planted canopy carries the intervention accent while it grows in
+  col = mix(col, col * 0.7 + vec3(0.10, 0.62, 0.52) * 0.55, vPlanted * 0.55);
+
+  col *= mix(0.05, 1.0, revealAt(uv));
+
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+export interface TreeRecord {
+  lat: number;
+  lon: number;
+  radiusM: number;
+  density: number;
+}
+
+export class Trees {
+  readonly canopy: THREE.InstancedMesh;
+  readonly trunks: THREE.InstancedMesh;
+  private readonly canopyMat: THREE.ShaderMaterial;
+  private readonly trunkMat: THREE.MeshBasicMaterial;
+  private readonly baseCount: number;
+  private readonly radius: Float32Array;
+  private readonly density: Float32Array;
+  private readonly seed: Float32Array;
+  private readonly planted: Float32Array;
+  private plantedCount = 0;
+
+  constructor(records: TreeRecord[], fields: TwinFields, exposure: THREE.Texture, reveal: THREE.Texture) {
+    const cap = records.length + SLACK;
+    this.baseCount = records.length;
+
+    this.radius = new Float32Array(cap);
+    this.density = new Float32Array(cap);
+    this.seed = new Float32Array(cap);
+    this.planted = new Float32Array(cap);
+
+    const canopyGeo = new THREE.IcosahedronGeometry(1, 1);
+    const trunkGeo = new THREE.CylinderGeometry(0.16, 0.22, 1, 6);
+    // CylinderGeometry is Y-up; our world is Z-up
+    trunkGeo.rotateX(Math.PI / 2);
+    trunkGeo.translate(0, 0, 0.5);
+
+    this.canopyMat = new THREE.ShaderMaterial({
+      vertexShader: CANOPY_VERT,
+      fragmentShader: CANOPY_FRAG,
+      uniforms: {
+        uExposure: { value: exposure },
+        uSvf: { value: fields.svf },
+        uExtent: { value: new THREE.Vector2(fields.origin.widthM, fields.origin.heightM) },
+        uSunDir: { value: new THREE.Vector3(0, 0, 1) },
+        uSunColor: { value: new THREE.Color(1.0, 0.94, 0.86) },
+        uSunIntensity: { value: 1 },
+        uPlantGrow: { value: 1 },
+        uReveal: { value: reveal },
+        uRevealOn: { value: 0 },
+      },
+    });
+    this.trunkMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.16, 0.13, 0.1) });
+
+    this.canopy = new THREE.InstancedMesh(canopyGeo, this.canopyMat, cap);
+    this.trunks = new THREE.InstancedMesh(trunkGeo, this.trunkMat, cap);
+    this.canopy.frustumCulled = false;
+    this.trunks.frustumCulled = false;
+    this.canopy.renderOrder = 3;
+    this.trunks.renderOrder = 3;
+
+    canopyGeo.setAttribute("aRadius", new THREE.InstancedBufferAttribute(this.radius, 1));
+    canopyGeo.setAttribute("aDensity", new THREE.InstancedBufferAttribute(this.density, 1));
+    canopyGeo.setAttribute("aSeed", new THREE.InstancedBufferAttribute(this.seed, 1));
+    canopyGeo.setAttribute("aPlanted", new THREE.InstancedBufferAttribute(this.planted, 1));
+
+    records.forEach((t, i) => this.write(i, t, fields, 0));
+    this.setCount(records.length);
+  }
+
+  private write(i: number, t: TreeRecord, fields: TwinFields, planted: number) {
+    const [x, y] = fields.origin.toXY(t.lat, t.lon);
+    // canopy centre sits near the top of the trunk; backend treats canopy top as 8 m
+    const trunkH = Math.max(2.2, Math.min(6.4, t.radiusM * 1.15));
+    const m = new THREE.Matrix4().makeTranslation(x, y, trunkH);
+    this.canopy.setMatrixAt(i, m);
+    this.trunks.setMatrixAt(
+      i,
+      new THREE.Matrix4()
+        .makeTranslation(x, y, 0)
+        .multiply(new THREE.Matrix4().makeScale(1, 1, trunkH)),
+    );
+    this.radius[i] = t.radiusM;
+    this.density[i] = t.density;
+    this.seed[i] = (x * 7.13 + y * 3.71) % 1000;
+    this.planted[i] = planted;
+  }
+
+  private setCount(n: number) {
+    this.canopy.count = n;
+    this.trunks.count = n;
+    this.canopy.instanceMatrix.needsUpdate = true;
+    this.trunks.instanceMatrix.needsUpdate = true;
+    const g = this.canopy.geometry;
+    (g.getAttribute("aRadius") as THREE.InstancedBufferAttribute).needsUpdate = true;
+    (g.getAttribute("aDensity") as THREE.InstancedBufferAttribute).needsUpdate = true;
+    (g.getAttribute("aSeed") as THREE.InstancedBufferAttribute).needsUpdate = true;
+    (g.getAttribute("aPlanted") as THREE.InstancedBufferAttribute).needsUpdate = true;
+  }
+
+  /** Replace the set of interventionderived trees planted this session. */
+  setPlanted(records: TreeRecord[], fields: TwinFields) {
+    const n = Math.min(records.length, SLACK);
+    for (let i = 0; i < n; i++) this.write(this.baseCount + i, records[i], fields, 1);
+    this.plantedCount = n;
+    this.setCount(this.baseCount + n);
+  }
+
+  get planted_count() {
+    return this.plantedCount;
+  }
+
+  setSun(dir: THREE.Vector3, intensity: number, color: THREE.Color) {
+    const u = this.canopyMat.uniforms;
+    u.uSunDir.value.copy(dir);
+    u.uSunIntensity.value = intensity;
+    u.uSunColor.value.copy(color);
+  }
+
+  /** 0..1 pop-in used when new canopy is planted. */
+  setPlantGrow(g: number) {
+    this.canopyMat.uniforms.uPlantGrow.value = g;
+  }
+
+  dispose() {
+    this.canopy.geometry.dispose();
+    this.trunks.geometry.dispose();
+    this.canopyMat.dispose();
+    this.trunkMat.dispose();
+  }
+}

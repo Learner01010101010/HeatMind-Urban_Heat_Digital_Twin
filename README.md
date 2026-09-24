@@ -64,8 +64,9 @@ Optional: `set ANTHROPIC_API_KEY=...` before starting the backend enables an LLM
 
 | Pillar | Where | How |
 |---|---|---|
-| **Urban Heat Digital Twin** | `backend/app/services/heat_twin_service.py` | 10 m raster of pedestrian feels-like heat. NOAA heat index of ambient air, plus direct solar load × sun exposure, ground long-wave from surface material (asphalt / concrete / dry ground / grass / water), traffic heat and urban-canyon retention, minus canopy evapotranspiration and lake cooling. |
+| **Urban Heat Digital Twin** | `backend/app/services/heat_twin_service.py` | 10 m raster of pedestrian feels-like heat. NOAA heat index of ambient air, plus direct solar load × sun exposure, ground long-wave from surface material (asphalt / concrete / dry ground / grass / water), traffic heat and urban-canyon retention, minus canopy evapotranspiration and lake cooling. Canyon retention uses the **sky view factor** (Oke canyon geometry, as in SOLWEIG/UMEP) rather than a built-density proxy, so trapping concentrates in genuinely enclosed streets. Set `HEATMIND_SVF_CANYON=0` to fall back to the density model. |
 | **AI Shadow Engine** | `services/shadow_engine.py`, `services/solar.py` | NOAA solar ephemeris gives sun elevation and azimuth. Every cell ray-marches toward the sun through the building-height and tree-canopy fields. Building shadow polygons are cast at `h / tan(elev)` toward `azimuth + 180°`. |
+| **Sky View Factor** | `services/svf.py` | 32-azimuth horizon scan of the building-height raster, `SVF = 1 - mean(sin²θ_max)`. Independent of sun and weather, so it is computed once and disk-cached (~0.6 s). One field, two consumers: the canyon physics term above, and the ambient occlusion in the 3D renderer. |
 | **Future Heat Prediction** | `services/prediction_service.py` | Physics-informed nowcast from now to +3 h (15-minute keyframes): shadows are recomputed for the future sun position, and air temperature and RH are interpolated from the Open-Meteo hourly forecast (or the demo scenario curve). |
 | **Personalized Heat Risk Engine** | `services/risk_scoring.py` | Six transparent factors (cumulative exposure, peak heat index, shade, exertion, rest/water gaps, surface radiant heat), each weighted per persona (Student / Outdoor Worker / Senior / Cyclist) into a 0–100 score. Personas also differ in speed, vulnerability shift and daily budget. |
 | **Digital Heat Passport** | `services/passport_service.py` | Minutes in NOAA "danger" heat vs. a daily budget, shaded distance, rest stops, streaks and badges, stored in SQLite under an anonymous session token. |
@@ -75,6 +76,67 @@ Plus:
 - **Heat-aware routing** (`services/routing_service.py`): Dijkstra over the real OSM street graph. A sweep of heat-aversion weights combined with the penalty method yields ≥2 distinct routes from fastest to coolest. Walkers are sampled on the shady kerb, cyclists on the carriageway.
 - **Explainability** (`services/explanation_service.py`): every score ships with a rule-based "why" (shade %, peak °C along a named street, water points, trade-off vs. the fastest route), with an optional LLM polish that falls back silently.
 - **Simulate** (`POST /api/routes/simulate`): advance the clock or spike the temperature. Every route is re-scored in under 1 s, and you get a reroute suggestion if your route is no longer the safest.
+
+## The 3D Heat Twin renderer
+
+Heat Twin mode is a Three.js scene rendered *inside MapLibre's own WebGL context* as a
+custom layer (`components/map/three/`), sharing its camera and depth buffer — not an
+overlay floating above the map.
+
+| Piece | What it does |
+|---|---|
+| `origin.ts` | Renders in the backend's own local metric frame (metres from the zone's SW corner, `services/geo.py`), composing MapLibre's matrix on top. Keeps vertices in a range where float32 is precise instead of pushing Mercator's ~1e-8 units through the GPU. |
+| `sunExposure.ts` | Re-marches `shadow_engine.sun_exposure()` on the GPU every time the sun moves, at 6× the physics grid (1302×1098) in **~0.3 ms**. Adds a distance-scaled penumbra. This buffer lights the scene *and* tints the ground, so the shade you see is derived from the same height raster the temperatures came from. |
+| `groundHeat.ts` | The heat surface, with the colour ramp applied per fragment from a LUT texture, plus isotherm contours, sky-view ambient occlusion and live shadow tint. |
+| `buildings.ts` | All 998 footprints merged into one draw call (~16.5k triangles). Windows, mullions, spandrels, entrances and parapets are generated in the fragment shader from wall UVs and a stable per-building seed — no facade geometry. |
+| `roads.ts` | The 473 real OSM ways as ground ribbons at their true widths, with kerbs and dashed centre lines on classified roads. Drawn *below* the heat plane so the carriageway reads through it and gets tinted by the temperature above. |
+| `reveal.ts` | Progressive reveal: a coverage field painted by each position fix. Ground already walked stays visible, so the twin builds up along the route taken. Every shader multiplies by it, so heat, roads, buildings and canopy appear together. |
+| `trees.ts` | 2,452 canopies + trunks as two InstancedMeshes, sized from the zone's own `radius_m` / `density`. Canopy planted by the intervention simulator is appended live and casts real shadow on the next march. |
+| `lib/solar.ts` | Port of the backend NOAA solar algorithm, so sun position is continuous while scrubbing instead of snapping between 15-minute keyframes. |
+
+Two things this replaced, both worth knowing about:
+
+- **Keyframe blending was mixing colours, not temperatures.** Thirteen PNG data-URL image
+  sources were cross-faded by opacity, so a moment halfway between "now" (teal) and "+1h"
+  (orange) rendered as an olive that matches no temperature on the scale. The two keyframes
+  are now mixed in encoded temperature space and the ramp applied afterwards.
+- **Building shadow polygons were geometrically wrong.** They were cast as the convex hull of
+  the footprint and its translated copy; the true shadow is a Minkowski sum, so any
+  non-convex (L- or U-shaped) building over-covered its own notch. The map layer is gone.
+  `GET /api/shadow` still serves the polygons — it is public API and listed in the open-data
+  catalog — but the twin no longer draws them.
+
+## Anthropogenic heat — traffic and industry
+
+Waste heat people put into the street, separate from anything the sun does
+(`services/anthropogenic.py`).
+
+- **Traffic.** The per-road-class weight was a constant — a trunk road contributed the
+  same 2.2 °C at 04:00 as in the evening jam. It is now the *jam-hour* value, scaled by a
+  diurnal congestion profile with the usual twin Indian commute peaks. Zone-mean
+  anthropogenic heat runs 0.05 °C at 04:00 and 0.45 °C at 19:00, peaking at **4.5 °C** on
+  the bypass in the evening jam.
+- **Industry.** Waste heat over inferred-industrial footprints with a working-hours duty
+  cycle, decaying over ~80 m.
+
+**Both are modelled, and the README says so because the data does not exist.** There is
+no free real-time traffic feed for this zone, and the Overpass extract contains *no*
+industrial tags at all — the only land-use tags present are `residential` (×17) and
+`education` (×2). `set_congestion_source()` is the seam where a paid traffic API (TomTom,
+HERE, Google Roads) would attach without touching anything else. Both layers appear in
+`/api/meta` provenance as `modelled`, and `GET /api/anthropogenic` returns the profiles
+and caveats in full.
+
+## Start from where you are
+
+`components/hud/MyLocation.tsx` sets your position as the trip origin and reveals the twin
+only along the ground you have covered.
+
+The twin models ~4 km², so standing outside it is a real outcome rather than an error:
+`lib/geolocation.ts` carries an explicit `outside` state that says so and offers the
+campus instead. A simulated 1.4 m/s walker is included for demoing away from Narhe — it is
+labelled `simulated` in the search bar, in the popover and by a different marker colour, so
+it can never be mistaken for a real fix.
 
 ## Screens
 
@@ -94,6 +156,8 @@ The map is the hero: on desktop it keeps at least 85% of the screen, and route p
 ```
 GET  /api/meta                         zone, clock, provenance, risk model
 GET  /api/zone                         buildings / surfaces / trees GeoJSON + named places
+GET  /api/zone/fields                  height / canopy / sky-view-factor / surface rasters for GPU upload
+GET  /api/anthropogenic?time           traffic-congestion + industrial waste heat (modelled; see provenance)
 GET  /api/heat/twin?scenario&time&offset_min&temp_delta&format=grid|geojson
 GET  /api/heat/predict?horizon=30m|1h|2h|3h
 GET  /api/heat/layers?time              cooling corridors, hot streets, hotspots (Heat Twin mode)

@@ -1,0 +1,345 @@
+"use client";
+
+import type * as maplibregl from "maplibre-gl";
+import * as THREE from "three";
+import type { BuildingProps } from "@/lib/api";
+import { Buildings } from "./buildings";
+import type { TwinFields } from "./fields";
+import { GroundHeat } from "./groundHeat";
+import { RevealField } from "./reveal";
+import { Roads, type RoadFeatureProps } from "./roads";
+import { SunExposurePass } from "./sunExposure";
+import { Trees, type TreeRecord } from "./trees";
+
+/**
+ * A MapLibre custom layer that renders the 3D twin inside MapLibre's own GL context.
+ *
+ * It shares the context, the depth buffer and the camera, so this is not an overlay
+ * floating above a map: buildings occlude and are occluded by everything MapLibre
+ * draws, and the two can never drift apart while panning.
+ *
+ * Geometry is submitted in the backend's local metric frame (see LocalOrigin) and the
+ * map's own matrix is composed on top, which keeps vertex data in a range where
+ * float32 is precise instead of pushing Mercator's 1e-9 units through the GPU.
+ */
+
+export interface SunState {
+  elevationDeg: number;
+  azimuthDeg: number;
+  intensity: number;
+}
+
+export interface FrameRef {
+  key: string;
+  heat: Uint8Array;
+  shade: Uint8Array;
+}
+
+const DAY = new THREE.Color(1.0, 0.945, 0.87);
+const DUSK = new THREE.Color(1.0, 0.72, 0.48);
+const NIGHT = new THREE.Color(0.55, 0.64, 0.95);
+
+export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
+  readonly id = "heat-twin-3d";
+  readonly type = "custom" as const;
+  readonly renderingMode = "3d" as const;
+
+  private map!: maplibregl.Map;
+  private renderer!: THREE.WebGLRenderer;
+  private readonly scene = new THREE.Scene();
+  private readonly camera = new THREE.Camera();
+
+  private exposurePass!: SunExposurePass;
+  private ground!: GroundHeat;
+  private roads!: Roads;
+  private reveal!: RevealField;
+  private buildings!: Buildings;
+  private trees!: Trees;
+
+  private sun: SunState = { elevationDeg: 45, azimuthDeg: 180, intensity: 1 };
+  private sunDir = new THREE.Vector3(0, 0, 1);
+  private sunColor = DAY.clone();
+  private twinMode = false;
+  private grow = 0;
+  private growTarget = 0;
+  private plantGrow = 1;
+  private lastMarchMs = 0;
+  private revealOn = false;
+
+  constructor(
+    private readonly fields: TwinFields,
+    private readonly buildingFeatures: GeoJSON.Feature<GeoJSON.Polygon, BuildingProps>[],
+    private readonly treeRecords: TreeRecord[],
+    private readonly roadFeatures: GeoJSON.Feature<GeoJSON.LineString, RoadFeatureProps>[],
+  ) {}
+
+  // ---------------------------------------------------------------- lifecycle
+  onAdd(map: maplibregl.Map, gl: WebGL2RenderingContext) {
+    this.map = map;
+    this.renderer = new THREE.WebGLRenderer({
+      canvas: map.getCanvas(),
+      context: gl,
+      antialias: true,
+    });
+    this.renderer.autoClear = false;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.05;
+
+    this.exposurePass = new SunExposurePass(this.fields);
+    const exposure = this.exposurePass.target.texture;
+    this.reveal = new RevealField(this.fields);
+    const reveal = this.reveal.texture;
+
+    this.roads = new Roads(this.roadFeatures, this.fields, exposure, reveal);
+    this.ground = new GroundHeat(this.fields, exposure, reveal);
+    this.buildings = new Buildings(this.buildingFeatures, this.fields, exposure, reveal);
+    this.trees = new Trees(this.treeRecords, this.fields, exposure, reveal);
+
+    this.scene.add(this.roads.mesh);
+    this.scene.add(this.ground.mesh);
+    this.scene.add(this.buildings.mesh);
+    this.scene.add(this.trees.canopy);
+    this.scene.add(this.trees.trunks);
+
+    this.applySun();
+    // Development hook: lets the render pipeline be inspected and the GPU exposure
+    // field compared against the backend's shade grid from the console. Not wired to
+    // any UI, and never attached in a production build.
+    if (typeof window !== "undefined" && process.env.NODE_ENV !== "production") {
+      (window as unknown as { __heatTwin?: unknown }).__heatTwin = this;
+    }
+  }
+
+  /** Render counters for the development hook above. */
+  readonly debug = { renders: 0 };
+
+  onRemove() {
+    this.exposurePass?.dispose();
+    this.roads?.dispose();
+    this.reveal?.dispose();
+    this.ground?.dispose();
+    this.buildings?.dispose();
+    this.trees?.dispose();
+    this.renderer?.dispose();
+  }
+
+  // ------------------------------------------------------------------- render
+  render(_gl: WebGL2RenderingContext, args: maplibregl.CustomRenderMethodInput) {
+    if (!this.renderer) return;
+
+    // ease the extrusions in and out of the ground on mode change
+    const d = this.growTarget - this.grow;
+    if (Math.abs(d) > 0.001) {
+      this.grow += d * 0.09;
+      this.map.triggerRepaint();
+    } else {
+      this.grow = this.growTarget;
+    }
+    this.buildings.setGrow(this.grow);
+
+    if (this.plantGrow < 1) {
+      this.plantGrow = Math.min(1, this.plantGrow + 0.05);
+      this.trees.setPlantGrow(this.plantGrow);
+      this.map.triggerRepaint();
+    }
+
+    const visible = this.grow > 0.002;
+    this.buildings.mesh.visible = visible;
+    this.trees.canopy.visible = visible;
+    this.trees.trunks.visible = visible;
+
+    // the sun march only re-runs when the sun has actually moved
+    const t0 = performance.now();
+    if (this.exposurePass.update(this.renderer, this.sun.elevationDeg, this.sun.azimuthDeg)) {
+      this.lastMarchMs = performance.now() - t0;
+    }
+
+    // MapLibre v6 exposes several matrices here and only one of them is the
+    // mercator-to-clip transform a custom layer wants. `modelViewProjectionMatrix`
+    // is NOT it — feeding it mercator [0,1] coordinates puts the scene tens of
+    // thousands of clip units off screen. Since the projection refactor that added
+    // globe support, the transform for the default (mercator) projection lives in
+    // `defaultProjectionData.mainMatrix`, whose space `tileMercatorCoords` reports
+    // as [0, 0, 1, 1] — i.e. whole-world mercator, which is what LocalOrigin targets.
+    this.camera.projectionMatrix = new THREE.Matrix4()
+      .fromArray(args.defaultProjectionData.mainMatrix as unknown as number[])
+      .multiply(this.fields.origin.localToWorld);
+
+    this.debug.renders++;
+    this.renderer.resetState();
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  // -------------------------------------------------------------------- state
+  setSun(sun: SunState) {
+    this.sun = sun;
+    this.applySun();
+    this.map?.triggerRepaint();
+  }
+
+  private applySun() {
+    const el = THREE.MathUtils.degToRad(this.sun.elevationDeg);
+    const az = THREE.MathUtils.degToRad(this.sun.azimuthDeg);
+    // azimuth is clockwise from north, matching the backend solar model
+    this.sunDir.set(Math.cos(el) * Math.sin(az), Math.cos(el) * Math.cos(az), Math.sin(el));
+    if (this.sunDir.lengthSq() > 0) this.sunDir.normalize();
+
+    const e = this.sun.elevationDeg;
+    if (e <= 0) this.sunColor.copy(NIGHT);
+    else if (e < 12) this.sunColor.copy(DUSK).lerp(DAY, e / 12);
+    else this.sunColor.copy(DAY);
+
+    const intensity = e > 0 ? this.sun.intensity : 0;
+    this.buildings?.setSun(this.sunDir, intensity, e <= 2, this.sunColor);
+    this.roads?.setSun(intensity, this.sunColor);
+    this.trees?.setSun(this.sunDir, intensity, this.sunColor);
+  }
+
+  /** Keyframes bracketing the timeline position; blended in temperature space. */
+  setKeyframes(a: FrameRef | null, b: FrameRef | null, blend: number) {
+    this.ground?.setKeyframes(a, b, blend);
+    this.map?.triggerRepaint();
+  }
+
+  setMode(twin: boolean) {
+    this.twinMode = twin;
+    this.growTarget = twin ? 1 : 0;
+    this.ground?.setStyle({
+      // Slightly lighter than the old raster overlay's 0.58: the ground now also
+      // carries sky-view ambient occlusion and live shadow tint, so the same opacity
+      // read heavier than before and buried the buildings standing in it.
+      opacity: twin ? 0.5 : 0.42,
+      isotherms: true,
+      ao: twin ? 0.75 : 0.45,
+      shade: twin ? 0.8 : 0.5,
+    });
+    this.map?.triggerRepaint();
+  }
+
+  // ------------------------------------------------------------ progressive reveal
+  /**
+   * Paint a position fix into the reveal field.
+   *
+   * Everything already walked stays visible, so the twin builds up along the route
+   * taken rather than flickering in and out around a moving disc.
+   */
+  addPositionFix(lat: number, lon: number, radiusM?: number) {
+    if (!this.reveal) return;
+    if (this.reveal.addFix(lat, lon, radiusM)) this.map?.triggerRepaint();
+  }
+
+  /** Turn progressive reveal on or off across every layer at once. */
+  setRevealEnabled(on: boolean) {
+    this.revealOn = on;
+    for (const m of this.revealMaterials()) {
+      const u = m.uniforms.uRevealOn;
+      if (u) u.value = on ? 1 : 0;
+    }
+    this.map?.triggerRepaint();
+  }
+
+  /** Drop the reveal mask entirely and show the whole zone. */
+  revealAll() {
+    this.reveal?.revealAll();
+    this.map?.triggerRepaint();
+  }
+
+  clearReveal() {
+    this.reveal?.clear();
+    this.map?.triggerRepaint();
+  }
+
+  get revealCoverage() {
+    return this.reveal?.coverage ?? 0;
+  }
+
+  private revealMaterials(): THREE.ShaderMaterial[] {
+    const out: THREE.ShaderMaterial[] = [];
+    this.scene.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.ShaderMaterial | undefined;
+      if (m && m.uniforms && "uRevealOn" in m.uniforms) out.push(m);
+    });
+    return out;
+  }
+
+  /** Canopy planted by the intervention simulator this session. */
+  setPlantedTrees(records: TreeRecord[]) {
+    if (!this.trees) return;
+    const grew = records.length > this.trees.planted_count;
+    this.trees.setPlanted(records, this.fields);
+    if (grew) {
+      this.plantGrow = 0;
+      this.trees.setPlantGrow(0);
+    }
+    this.map?.triggerRepaint();
+  }
+
+  get isTwinMode() {
+    return this.twinMode;
+  }
+
+  // --------------------------------------------------------------- diagnostics
+  /**
+   * Agreement between the GPU exposure field and the backend's own shade grid.
+   *
+   * Reads back a bounded sample rather than the whole target: this is a diagnostic,
+   * and a full readback of the supersampled buffer would stall the pipeline. The
+   * backend remains the authority for every number the product reports; this only
+   * answers "is what you're looking at the same shade the temperature came from?".
+   */
+  measureAgreement(shade: Uint8Array, sampleSize = 192): { agreement: number; meanAbs: number; n: number } | null {
+    if (!this.renderer || !this.exposurePass) return null;
+    const target = this.exposurePass.target;
+    const w = Math.min(sampleSize, target.width);
+    const h = Math.min(sampleSize, target.height);
+    const x0 = Math.floor((target.width - w) / 2);
+    const y0 = Math.floor((target.height - h) / 2);
+    const buf = new Uint8Array(w * h * 4);
+    try {
+      this.renderer.readRenderTargetPixels(target, x0, y0, w, h, buf);
+    } catch {
+      return null;
+    }
+
+    const { rows, cols } = this.fields;
+    let sum = 0;
+    let agree = 0;
+    let n = 0;
+    for (let j = 0; j < h; j += 2) {
+      for (let i = 0; i < w; i += 2) {
+        // render-target pixel -> normalised zone position -> physics cell
+        const u = (x0 + i + 0.5) / target.width;
+        const v = (y0 + j + 0.5) / target.height;
+        const c = Math.min(cols - 1, Math.floor(u * cols));
+        // the backend grid is stored north-first; the GPU field is GL-oriented
+        const r = Math.min(rows - 1, Math.floor((1 - v) * rows));
+        const gpu = buf[(j * w + i) * 4] / 255;
+        const cpu = shade[r * cols + c] / 255;
+        const d = Math.abs(gpu - cpu);
+        sum += d;
+        if (d < 0.15) agree++;
+        n++;
+      }
+    }
+    if (!n) return null;
+    return { agreement: agree / n, meanAbs: sum / n, n };
+  }
+
+  get stats() {
+    return {
+      triangles: this.buildings?.triangles ?? 0,
+      roadTriangles: this.roads?.triangles ?? 0,
+      roads: this.roadFeatures.length,
+      trees: this.treeRecords.length,
+      planted: this.trees?.planted_count ?? 0,
+      marchMs: this.lastMarchMs,
+      exposureRes: this.exposurePass
+        ? `${this.exposurePass.target.width}x${this.exposurePass.target.height}`
+        : "-",
+      physicsRes: `${this.fields.cols}x${this.fields.rows}`,
+      revealOn: this.revealOn,
+      revealCoverage: Math.round(this.revealCoverage * 1000) / 10,
+    };
+  }
+}

@@ -16,8 +16,9 @@ from datetime import datetime
 
 import numpy as np
 
-from ..config import CENTER, HIGH_HEAT_C
+from ..config import (CANYON_K_DENSITY, CANYON_K_SVF, CENTER, HIGH_HEAT_C, USE_SVF_CANYON)
 from . import geo
+from .anthropogenic import anthropogenic_field
 from .shadow_engine import sun_exposure
 from .solar import solar_position
 from .weather import Weather, weather_service
@@ -42,6 +43,21 @@ INTERVENTIONS = {
 }
 
 
+def canyon_term(z: Zone, rs=None, cs=None) -> np.ndarray:
+    """Long-wave heat trapped between buildings.
+
+    Default: a box-blurred built-density proxy (the original hand-tuned model).
+    With HEATMIND_SVF_CANYON=1: (1 - sky view factor), the standard urban-canyon
+    geometry term, which concentrates trapping in genuinely enclosed streets
+    instead of smearing it over every built-up neighbourhood.
+    """
+    if USE_SVF_CANYON:
+        svf = z.svf if rs is None else z.svf[rs, cs]
+        return CANYON_K_SVF * (1.0 - svf)
+    dens = z.built_density if rs is None else z.built_density[rs, cs]
+    return CANYON_K_DENSITY * dens
+
+
 def heat_index_c(t_c: np.ndarray | float, rh: float) -> np.ndarray:
     """NOAA / Rothfusz heat index, vectorised, °C in/out."""
     T = np.asarray(t_c, dtype=float) * 9 / 5 + 32
@@ -60,6 +76,20 @@ def heat_index_c(t_c: np.ndarray | float, rh: float) -> np.ndarray:
     return (hi - 32) * 5 / 9
 
 
+# Per-frame memory budget. A frame holds four float32 grids plus one bool mask,
+# so it costs ~17 bytes per cell. The cache size is derived from that rather than
+# fixed, because the zone bbox is configurable: at the 4 km2 campus a frame is
+# ~0.7 MB and 80 frames cost 54 MB, but over 42 km2 of south Pune the same 80
+# frames would need 570 MB. The budget keeps the cache useful at either size.
+FRAME_CACHE_BUDGET_BYTES = 256 * 1024 * 1024
+BYTES_PER_CELL_PER_FRAME = 17
+
+
+def _max_cached_frames(cells: int) -> int:
+    """How many frames fit the budget at this grid size (at least one timeline)."""
+    return max(14, min(80, FRAME_CACHE_BUDGET_BYTES // (cells * BYTES_PER_CELL_PER_FRAME)))
+
+
 @dataclass
 class Frame:
     when: datetime
@@ -69,11 +99,13 @@ class Frame:
     elev: float
     az: float
     intensity: float
+    # float32 throughout: these grids are cached in bulk and the model's own
+    # precision is nowhere near float64, so the second 4 bytes buy nothing.
     exposure: np.ndarray
-    building_shadow: np.ndarray
-    tree_occ: np.ndarray
+    building_shadow: np.ndarray  # bool mask, not a float field
     t_surface: np.ndarray
     feels: np.ndarray
+    anthro: np.ndarray
     stats: dict = field(default_factory=dict)
 
     def encode(self) -> dict:
@@ -95,28 +127,55 @@ class HeatTwin:
         self._lock = threading.Lock()
         z = self.zone
         self.walkable = ~z.building
+        self._max_frames = _max_cached_frames(z.shape[0] * z.shape[1])
         self._road_names = self._road_name_grid()
+        self._places = self._place_grid()
 
-    def _road_name_grid(self) -> dict:
-        names = {}
+    def _road_name_grid(self) -> tuple[np.ndarray, list[str]]:
+        """Named road nodes as (cells, names), for a vectorised nearest lookup.
+
+        This used to be a dict scanned linearly on every call. Over the campus that
+        was a few thousand entries; across 42 km2 of south Pune it is ~130k, and the
+        scan runs twice per frame for the hottest/coolest labels plus once per point
+        probe. Held as an (N, 2) array so the search is one numpy argmin.
+        """
+        cells: list[tuple[int, int]] = []
+        names: list[str] = []
+        seen: dict[tuple[int, int], int] = {}
         for r in self.zone.data["roads"]:
             if not r["name"]:
                 continue
             for _, la, lo in r["nodes"]:
-                names[geo.latlon_to_cell(la, lo)] = r["name"]
-        return names
+                cell = geo.latlon_to_cell(la, lo)
+                if cell in seen:
+                    names[seen[cell]] = r["name"]
+                    continue
+                seen[cell] = len(names)
+                cells.append(cell)
+                names.append(r["name"])
+        arr = np.array(cells, dtype=np.int32) if cells else np.zeros((0, 2), dtype=np.int32)
+        return arr, names
+
+    def _place_grid(self) -> tuple[np.ndarray, list[str]]:
+        cells = [geo.latlon_to_cell(p["lat"], p["lon"]) for p in self.zone.places]
+        arr = np.array(cells, dtype=np.int32) if cells else np.zeros((0, 2), dtype=np.int32)
+        return arr, [p["name"] for p in self.zone.places]
 
     def nearest_name(self, r: int, c: int) -> str:
-        best, bd = "", 1e9
-        for (rr, cc), n in self._road_names.items():
-            d = (rr - r) ** 2 + (cc - c) ** 2
-            if d < bd:
-                best, bd = n, d
-        for p in self.zone.places:
-            pr, pc = geo.latlon_to_cell(p["lat"], p["lon"])
-            d = (pr - r) ** 2 + (pc - c) ** 2
-            if d < bd * 0.8:
-                best, bd = "near " + p["name"], d
+        best, bd = "", float("inf")
+        cells, names = self._road_names
+        if len(cells):
+            d2 = (cells[:, 0] - r) ** 2 + (cells[:, 1] - c) ** 2
+            i = int(np.argmin(d2))
+            best, bd = names[i], float(d2[i])
+
+        pcells, pnames = self._places
+        if len(pcells):
+            d2 = (pcells[:, 0] - r) ** 2 + (pcells[:, 1] - c) ** 2
+            i = int(np.argmin(d2))
+            # a named place only wins if it is clearly closer than the nearest street
+            if float(d2[i]) < bd * 0.8:
+                best = "near " + pnames[i]
         return best or "open ground"
 
     def frame(self, when: datetime, scenario: str = "live", temp_delta: float = 0.0) -> Frame:
@@ -128,7 +187,7 @@ class HeatTwin:
         f = self._compute(when, scenario, temp_delta)
         with self._lock:
             self._cache[key] = f
-            while len(self._cache) > 80:
+            while len(self._cache) > self._max_frames:
                 self._cache.popitem(last=False)
         return f
 
@@ -138,7 +197,7 @@ class HeatTwin:
         elev, az = solar_position(when, *CENTER)
         clearness = 1 - 0.75 * (w.cloud / 100) ** 3.4
         intensity = clearness * max(0.0, math.sin(math.radians(elev))) ** 1.15 if elev > 0 else 0.0
-        exposure, bshadow, tocc = sun_exposure(z, elev, az)
+        exposure, bshadow, _tree_occ = sun_exposure(z, elev, az)  # tree occlusion is folded into exposure
 
         storage = np.where(np.isin(z.surface, (1, 2, 6)), z.gain * 0.09, 0.0)  # thermal mass after sunset
         t_surf = w.air_c + z.gain * intensity * (0.25 + 0.75 * exposure) + storage * (1 - intensity)
@@ -148,11 +207,16 @@ class HeatTwin:
         hi_air = float(heat_index_c(w.air_c, w.rh))
         solar_load = 5.6 * intensity * exposure  # direct beam on the body (mean-radiant-temperature proxy)
         ground_rad = 0.15 * (t_surf - w.air_c)  # long-wave from hot ground
-        canyon = 1.2 * z.built_density  # heat trapped between buildings
+        canyon = canyon_term(z)  # heat trapped between buildings
+        # Waste heat people put into the street: congestion-scaled traffic + industrial
+        # duty cycle. Replaces the old constant per-road-class weight.
+        anthro = anthropogenic_field(z, when)
         cooling = 2.2 * z.canopy_cooling + 2.4 * z.water_cooling + 0.35 * max(0.0, w.wind_ms - 1.0)
-        feels = hi_air + solar_load + ground_rad + z.traffic + canyon - cooling
+        feels = hi_air + solar_load + ground_rad + anthro + canyon - cooling
 
-        f = Frame(when, scenario, temp_delta, w, elev, az, intensity, exposure, bshadow, tocc, t_surf, feels)
+        f = Frame(when, scenario, temp_delta, w, elev, az, intensity,
+                  exposure.astype(np.float32), bshadow.astype(bool),
+                  t_surf.astype(np.float32), feels.astype(np.float32), anthro.astype(np.float32))
         f.stats = self._stats(f)
         return f
 
@@ -201,8 +265,8 @@ class HeatTwin:
             "lat": lat, "lon": lon, "feels_c": round(float(f.feels[r, c]), 1),
             "surface_c": round(float(f.t_surface[r, c]), 1), "air_c": round(f.weather.air_c, 1),
             "sun_exposure": round(float(f.exposure[r, c]), 2),
-            "building_shadow": bool(f.building_shadow[r, c] > 0.5), "canopy": round(float(z.canopy[r, c]), 2),
-            "surface": CODE_LABEL[int(z.surface[r, c])], "traffic_heat_c": round(float(z.traffic[r, c]), 1),
+            "building_shadow": bool(f.building_shadow[r, c]), "canopy": round(float(z.canopy[r, c]), 2),
+            "surface": CODE_LABEL[int(z.surface[r, c])], "traffic_heat_c": round(float(f.anthro[r, c]), 1),
             "near": self.nearest_name(r, c),
         }
 
@@ -248,9 +312,9 @@ class HeatTwin:
         hi_air = float(heat_index_c(f.weather.air_c, f.weather.rh))
         solar_load = 5.6 * f.intensity * exposure
         ground_rad = 0.15 * (t_surf - f.weather.air_c)
-        canyon = 1.2 * z.built_density[rs, cs]
+        canyon = canyon_term(z, rs, cs)
         cooling = 2.2 * canopy_cooling + 2.4 * z.water_cooling[rs, cs] + 0.35 * max(0.0, f.weather.wind_ms - 1.0)
-        feels_after = hi_air + solar_load + ground_rad + z.traffic[rs, cs] + canyon - cooling
+        feels_after = hi_air + solar_load + ground_rad + f.anthro[rs, cs] + canyon - cooling
 
         before = f.feels[rs, cs]
         before_mean = float(before[wk].mean())

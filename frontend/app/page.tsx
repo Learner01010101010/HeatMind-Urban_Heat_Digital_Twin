@@ -9,6 +9,7 @@ import AddPoiForm from "@/components/hud/AddPoiForm";
 import EquityToggle from "@/components/hud/EquityToggle";
 import { InsightChip, InsightPanel } from "@/components/hud/InsightChip";
 import InterventionPanel from "@/components/hud/InterventionPanel";
+import MyLocation from "@/components/hud/MyLocation";
 import ModeToggle from "@/components/hud/ModeToggle";
 import { ProfileButton, ProfilePanel } from "@/components/hud/Profile";
 import RouteSheet from "@/components/hud/RouteSheet";
@@ -103,6 +104,7 @@ export default function Home() {
           <ModeToggle compact />
           <EquityToggle compact />
           <InsightChip compact />
+          <MyLocation compact />
           <SimulateButton compact />
           <InterventionPanel compact />
           <AddPoiButton compact />
@@ -133,6 +135,7 @@ export default function Home() {
             <AddPoiButton />
             <InterventionPanel />
             <SimulateButton />
+            <MyLocation />
           </div>
         </div>
       ) : (

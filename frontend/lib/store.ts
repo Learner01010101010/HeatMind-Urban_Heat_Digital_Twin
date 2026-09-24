@@ -166,6 +166,8 @@ interface MapState {
   interventionResults: InterventionResult[];
   interventionBusy: boolean;
   equityOn: boolean;
+  /** Progressive reveal: only draw the twin where the user has been. */
+  revealOn: boolean;
   addPoiDraft: { lat: number; lon: number } | null;
   myPendingPois: CommunityPoiSubmitResult[];
   set: (p: Partial<Omit<MapState, "set">>) => void;
@@ -191,6 +193,7 @@ export const useMap = create<MapState>()((set) => ({
   interventionResults: [],
   interventionBusy: false,
   equityOn: false,
+  revealOn: false,
   addPoiDraft: null,
   myPendingPois: [],
   set: (p) => set(p),

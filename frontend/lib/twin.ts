@@ -1,14 +1,25 @@
 "use client";
 
 import { api, type Scenario, type TwinResponse } from "./api";
-import { TWIN_LUT } from "./heatColorScale";
 
+/**
+ * Decoded twin keyframes.
+ *
+ * These used to also carry `heatUrl` / `shadeUrl`: a canvas painted cell by cell
+ * through the colour LUT, upscaled 4x, then serialised with toDataURL('image/png')
+ * — a main-thread PNG encode of ~635k pixels, thirteen times over, producing
+ * multi-megabyte base64 strings that were handed to MapLibre image sources.
+ *
+ * The raster now goes straight to the GPU as a single-channel texture and the colour
+ * ramp is applied per fragment (see components/map/three/groundHeat.ts), so nothing
+ * needs encoding and the raw arrays are the only product of this module.
+ */
 export interface DecodedFrame extends TwinResponse {
   key: string;
+  /** feels_c = 20 + v / 4 — linear in degrees, so it is safe to interpolate directly */
   heat: Uint8Array;
+  /** sun_exposure = v / 255 */
   shade: Uint8Array;
-  heatUrl: string;
-  shadeUrl: string;
 }
 
 const cache = new Map<string, Promise<DecodedFrame>>();
@@ -20,80 +31,25 @@ function b64ToBytes(b64: string): Uint8Array {
   return out;
 }
 
-function renderHeat(heat: Uint8Array, cols: number, rows: number): string {
-  const c = document.createElement("canvas");
-  c.width = cols;
-  c.height = rows;
-  const ctx = c.getContext("2d")!;
-  const img = ctx.createImageData(cols, rows);
-  const feather = 8; // cells of soft fade at the twin boundary
-  for (let i = 0; i < heat.length; i++) {
-    const v = heat[i];
-    const r = Math.floor(i / cols);
-    const col = i % cols;
-    const edge = Math.min(r, col, rows - 1 - r, cols - 1 - col);
-    img.data[i * 4] = TWIN_LUT[v * 3];
-    img.data[i * 4 + 1] = TWIN_LUT[v * 3 + 1];
-    img.data[i * 4 + 2] = TWIN_LUT[v * 3 + 2];
-    img.data[i * 4 + 3] = edge >= feather ? 255 : Math.round(255 * Math.pow(edge / feather, 1.5));
-  }
-  ctx.putImageData(img, 0, 0);
-  // Upscale with smoothing so the 10 m cells read as a continuous surface.
-  const up = document.createElement("canvas");
-  up.width = cols * 4;
-  up.height = rows * 4;
-  const uctx = up.getContext("2d")!;
-  uctx.imageSmoothingEnabled = true;
-  uctx.imageSmoothingQuality = "high";
-  uctx.drawImage(c, 0, 0, up.width, up.height);
-  return up.toDataURL("image/png");
-}
-
-function renderShade(shade: Uint8Array, cols: number, rows: number): string {
-  const c = document.createElement("canvas");
-  c.width = cols;
-  c.height = rows;
-  const ctx = c.getContext("2d")!;
-  const img = ctx.createImageData(cols, rows);
-  for (let i = 0; i < shade.length; i++) {
-    const shadeAmt = 1 - shade[i] / 255; // 1 = full shade
-    img.data[i * 4] = 8;
-    img.data[i * 4 + 1] = 30;
-    img.data[i * 4 + 2] = 70;
-    img.data[i * 4 + 3] = Math.round(Math.pow(shadeAmt, 1.4) * 215);
-  }
-  ctx.putImageData(img, 0, 0);
-  const up = document.createElement("canvas");
-  up.width = cols * 4;
-  up.height = rows * 4;
-  const uctx = up.getContext("2d")!;
-  uctx.imageSmoothingEnabled = true;
-  uctx.drawImage(c, 0, 0, up.width, up.height);
-  return up.toDataURL("image/png");
-}
-
 export function frameKey(scenario: Scenario, baseTime: string, offsetMin: number, tempDelta: number) {
   return `${scenario}|${baseTime}|${offsetMin}|${tempDelta}`;
 }
 
-export function getFrame(scenario: Scenario, baseTime: string, offsetMin: number, tempDelta: number): Promise<DecodedFrame> {
+export function getFrame(
+  scenario: Scenario,
+  baseTime: string,
+  offsetMin: number,
+  tempDelta: number,
+): Promise<DecodedFrame> {
   const key = frameKey(scenario, baseTime, offsetMin, tempDelta);
   let p = cache.get(key);
   if (!p) {
-    p = api
-      .twin({ scenario, time: baseTime, offset_min: offsetMin, temp_delta: tempDelta })
-      .then((t) => {
-        const heat = b64ToBytes(t.grid.heat_b64);
-        const shade = b64ToBytes(t.grid.shade_b64);
-        return {
-          ...t,
-          key,
-          heat,
-          shade,
-          heatUrl: renderHeat(heat, t.grid.cols, t.grid.rows),
-          shadeUrl: renderShade(shade, t.grid.cols, t.grid.rows),
-        };
-      });
+    p = api.twin({ scenario, time: baseTime, offset_min: offsetMin, temp_delta: tempDelta }).then((t) => ({
+      ...t,
+      key,
+      heat: b64ToBytes(t.grid.heat_b64),
+      shade: b64ToBytes(t.grid.shade_b64),
+    }));
     p.catch(() => cache.delete(key));
     cache.set(key, p);
     if (cache.size > 90) cache.delete(cache.keys().next().value!);
