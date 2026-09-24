@@ -39,6 +39,7 @@ uniform sampler2D uHeatB;
 uniform sampler2D uLut;
 uniform sampler2D uExposure;
 uniform sampler2D uSvf;
+uniform sampler2D uRoad;
 uniform float uBlend;        // 0..1 between keyframe A and B
 uniform float uOpacity;
 uniform float uHasB;
@@ -68,18 +69,28 @@ void main() {
   col = mix(col, col * 0.55 + vec3(0.04), iso * uIsoStrength);
 
   // --- shading: sky view factor (ambient) + live sun exposure (direct) -------
+  // Softer curve than the original 2.5: that power darkened partially-enclosed
+  // ground hard enough to muddy the heat colour itself, which is the one thing on
+  // this plane that must always read cleanly.
   float svf = texture2D(uSvf, vUv).r;
-  float ao = mix(1.0, pow(clamp(svf, 0.0, 1.0), 2.5), uAoStrength);
+  float ao = mix(1.0, pow(clamp(svf, 0.0, 1.0), 1.6), uAoStrength);
   col *= ao;
 
   float shadow = texture2D(uExposure, vUv).g;
-  col = mix(col, col * 0.72 + vec3(0.012, 0.035, 0.085), shadow * uShadeStrength);
+  col = mix(col, col * 0.82 + vec3(0.012, 0.035, 0.085), shadow * uShadeStrength);
 
   // --- soft boundary so the twin does not end in a hard rectangle -----------
   vec2 cell = vUv * uGrid;
   float edge = min(min(cell.x, uGrid.x - cell.x), min(cell.y, uGrid.y - cell.y));
   float alpha = uOpacity * pow(clamp(edge / uFeatherCells, 0.0, 1.0), 1.5);
   alpha *= revealAt(vUv);   // undiscovered ground carries no heat surface
+
+  // Let more of the road ribbon's own colour and lane markings read through on
+  // carriageways, so the street network stays legible under the heat tint instead
+  // of being flattened to the same colour as the open ground around it. The heat
+  // value at that cell is still shown — just proportionally less totalising there.
+  float roadMask = texture2D(uRoad, vUv).r;
+  alpha *= mix(1.0, 0.6, roadMask);
 
   gl_FragColor = vec4(col * alpha, alpha); // premultiplied, matches MapLibre's blend
 }`;
@@ -105,6 +116,7 @@ export class GroundHeat {
         uLut: { value: makeLutTexture() },
         uExposure: { value: exposure },
         uSvf: { value: fields.svf },
+        uRoad: { value: fields.road },
         uBlend: { value: 0 },
         uOpacity: { value: 0.58 },
         uHasB: { value: 0 },

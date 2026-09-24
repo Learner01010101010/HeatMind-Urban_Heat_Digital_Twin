@@ -28,16 +28,21 @@ const CLASS_INDEX: Record<string, number> = {
 };
 
 // Per class: base asphalt tone, and whether it carries a painted centre line.
+// Deliberately high-contrast: the heat plane sits at ~50% opacity above these, so a
+// tone that reads fine unlit gets diluted to near-invisibility under the heat tint.
+// Brightness falls off with road class (highway brightest -> service darkest), and
+// footway/track/cycleway break from grayscale into warm beige / brown / cool blue so
+// they're identifiable by hue alone, not just by how wide the ribbon is.
 const CLASS_TONE = [
-  0.30, 0.30, 0.32, // trunk — widest, palest wear
-  0.27, 0.27, 0.29, // primary
-  0.25, 0.25, 0.27, // secondary
-  0.23, 0.23, 0.25, // tertiary
-  0.21, 0.21, 0.23, // residential / unclassified
-  0.19, 0.19, 0.21, // service
-  0.34, 0.32, 0.29, // footway — paving, warmer
-  0.26, 0.23, 0.19, // track — dirt
-  0.17, 0.21, 0.24, // cycleway — bluish
+  0.52, 0.51, 0.49, // trunk — highway, worn concrete, brightest and widest
+  0.44, 0.43, 0.41, // primary
+  0.37, 0.36, 0.35, // secondary
+  0.31, 0.30, 0.29, // tertiary
+  0.25, 0.245, 0.24, // residential / unclassified
+  0.20, 0.195, 0.19, // service
+  0.40, 0.37, 0.32, // footway — light paving, warm beige
+  0.28, 0.22, 0.16, // track — dirt, brown
+  0.16, 0.22, 0.27, // cycleway — cool blue-teal
 ];
 const HAS_CENTRELINE = [1, 1, 1, 1, 0, 0, 0, 0, 0];
 
@@ -92,7 +97,7 @@ void main() {
   // painted centre line, dashed, on classified roads only
   float dash = step(0.45, fract(vAlong / 9.0));
   float centre = (1.0 - smoothstep(0.0, 1.6 / max(vWidth, 2.0), a)) * dash * uCentreline[ci];
-  col = mix(col, vec3(0.62, 0.60, 0.48), centre * 0.7);
+  col = mix(col, vec3(0.88, 0.82, 0.52), centre * 0.85);
 
   // lighting from the same field the ground and buildings use
   vec2 uv = clamp(vGround / uExtent, 0.0, 1.0);

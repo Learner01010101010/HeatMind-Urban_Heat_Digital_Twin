@@ -73,16 +73,21 @@ void main() {
   float svf = texture2D(uSvf, uv).r;
   float shadow = texture2D(uExposure, uv).g;
 
-  // denser canopy reads darker and cooler; seed shifts the hue a little per tree
+  // denser canopy reads darker and cooler; seed shifts the hue a little per tree.
+  // Brighter and more saturated than a literal photo-reference tree green: at the
+  // scale and shading this renders at, a muted/realistic green reads as gray once
+  // ambient tint and shadow multiply it down, and canopy stops reading as canopy.
   float h = hash(vSeed);
-  vec3 base = mix(vec3(0.20, 0.34, 0.17), vec3(0.11, 0.24, 0.12), vDensity);
-  base *= 0.82 + 0.34 * h;
+  vec3 base = mix(vec3(0.30, 0.52, 0.22), vec3(0.16, 0.38, 0.19), vDensity);
+  base *= 0.85 + 0.3 * h;
 
   float ndl = max(dot(normalize(vNormal), uSunDir), 0.0);
   float direct = ndl * uSunIntensity * (1.0 - 0.7 * shadow);
-  float ambient = mix(0.26, 0.46, pow(clamp(svf, 0.0, 1.0), 1.4));
+  float ambient = mix(0.32, 0.52, pow(clamp(svf, 0.0, 1.0), 1.4));
 
-  vec3 col = base * (vec3(0.22, 0.29, 0.38) * ambient + uSunColor * direct);
+  // Ambient tint kept green-forward rather than sky-blue-dominant, or the canopy's
+  // own green gets multiplied toward teal-gray in anything but full direct sun.
+  vec3 col = base * (vec3(0.30, 0.36, 0.34) * ambient + uSunColor * direct);
   // freshly planted canopy carries the intervention accent while it grows in
   col = mix(col, col * 0.7 + vec3(0.10, 0.62, 0.52) * 0.55, vPlanted * 0.55);
 

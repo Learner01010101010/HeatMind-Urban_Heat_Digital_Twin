@@ -84,9 +84,17 @@ export default function SearchPill() {
               {(["origin", "destination"] as const).map((f) => {
                 const val = f === "origin" ? origin : destination;
                 const on = field === f;
+                const dot = f === "origin" ? "#34e2c6" : "#f472b6";
                 return (
-                  <div key={f} className={`flex items-center gap-3 px-4 h-12 ${f === "origin" ? "border-b border-white/[0.05]" : ""}`}>
-                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: f === "origin" ? "#34e2c6" : "#f472b6" }} />
+                  <div
+                    key={f}
+                    className={`flex items-center gap-3 px-4 h-12 transition-colors ${f === "origin" ? "border-b border-white/[0.05]" : ""}`}
+                    style={on ? { backgroundColor: "rgba(255,255,255,0.07)", boxShadow: `inset 3px 0 0 ${dot}` } : undefined}
+                  >
+                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: dot }} />
+                    <span className={`text-[10.5px] font-bold uppercase tracking-wide shrink-0 w-9 ${on ? "text-ink-200" : "text-ink-500"}`}>
+                      {f === "origin" ? "Start" : "To"}
+                    </span>
                     {on ? (
                       <input
                         ref={input}
@@ -96,13 +104,13 @@ export default function SearchPill() {
                           if (e.key === "Enter" && matches[0]) choose(matches[0]);
                           if (e.key === "Escape") setOpen(false);
                         }}
-                        placeholder={val ? short(val.label) : f === "origin" ? "Start" : "Where to?"}
+                        placeholder={val ? short(val.label) : f === "origin" ? "Search or tap the map" : "Where to?"}
                         className="flex-1 min-w-0 bg-transparent outline-none text-[15px] text-ink-100 placeholder:text-ink-400"
                         aria-label={f === "origin" ? "Start" : "Destination"}
                       />
                     ) : (
-                      <button onClick={() => setField(f)} className="flex-1 min-w-0 text-left text-[15px] truncate text-ink-200">
-                        {val ? short(val.label) : <span className="text-ink-400">{f === "origin" ? "Start" : "Where to?"}</span>}
+                      <button onClick={() => setField(f)} className="flex-1 min-w-0 text-left text-[15px] truncate text-ink-300 hover:text-ink-100">
+                        {val ? short(val.label) : <span className="text-ink-500">{f === "origin" ? "Start" : "Where to?"}</span>}
                       </button>
                     )}
                     <button

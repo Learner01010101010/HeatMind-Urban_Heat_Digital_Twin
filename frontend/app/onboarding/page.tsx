@@ -4,6 +4,7 @@ import { ArrowRight, Loader2, ShieldCheck, Sun, TreePine } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import Logo from "@/components/shell/Logo";
+import AuroraBackground from "@/components/ui/AuroraBackground";
 import PersonaSelector from "@/components/ui/PersonaSelector";
 import { ensureUser } from "@/lib/hooks";
 import { usePrefs } from "@/lib/store";
@@ -30,9 +31,13 @@ export default function Onboarding() {
   };
 
   return (
-    <main className="min-h-dvh relative bg-ink-950">
-      <div className="relative max-w-5xl mx-auto px-5 py-10 md:py-16 grid md:grid-cols-[1fr_1.15fr] gap-10 items-start">
-        <section>
+    <main className="min-h-dvh relative bg-ink-950 overflow-hidden">
+      <AuroraBackground />
+      <div className="relative z-10 max-w-5xl mx-auto px-5 py-10 md:py-16 grid md:grid-cols-[1fr_1.15fr] gap-10 items-start">
+        <section
+          className="relative rounded-[40px] p-6 md:p-8 -m-6 md:-m-8"
+          style={{ background: "radial-gradient(closest-side, rgba(3,5,9,0.55), rgba(3,5,9,0.22) 65%, transparent 100%)" }}
+        >
           <div className="flex items-center gap-3 mb-8">
             <Logo size={40} />
             <div>
@@ -59,7 +64,7 @@ export default function Onboarding() {
           </ul>
         </section>
 
-        <section className="bg-ink-900/80 border border-white/[0.08] rounded-3xl p-5 md:p-6">
+        <section className="bg-ink-900/90 border border-white/[0.08] rounded-3xl p-5 md:p-6">
           <h2 className="font-extrabold text-lg text-ink-100">Who&apos;s heading out?</h2>
           <p className="text-[13px] text-ink-400 mb-4">Identical heat isn&apos;t equally risky for everyone. Your persona sets how the risk engine weighs each factor.</p>
           <PersonaSelector value={persona} onChange={(p) => set({ persona: p })} />
