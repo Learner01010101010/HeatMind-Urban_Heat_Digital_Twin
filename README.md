@@ -43,6 +43,19 @@ Open **http://localhost:3000**. The Next.js app proxies `/api/*` and `/docs` to 
 
 Optional: `set ANTHROPIC_API_KEY=...` before starting the backend enables an LLM polish of the explanation text. The rule-based explanation always works and is never blocked.
 
+> **Linux without root/nvm:** if your distro's `node` is older than 20.9 and you can't install a version manager or `sudo apt install` a newer one, download a standalone build instead — no root needed:
+> ```bash
+> curl -fsSL -o node.tar.xz https://nodejs.org/dist/v20.18.1/node-v20.18.1-linux-x64.tar.xz
+> tar xf node.tar.xz && mv node-v20.18.1-linux-x64 .tools/node20 && rm node.tar.xz
+> export PATH="$(pwd)/.tools/node20/bin:$PATH"   # put this first so npm's spawned `next` binary picks it up too
+> ```
+> Similarly, if `python -m venv` fails with `ensurepip is not available` and you can't `apt install python3-venv` (needs sudo), create the venv without pip and bootstrap it manually:
+> ```bash
+> python3 -m venv .venv --without-pip
+> curl -fsSL https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+> .venv/bin/python get-pip.py && rm get-pip.py
+> ```
+
 ---
 
 ## What's inside (the 5 engines)
