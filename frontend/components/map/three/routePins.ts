@@ -35,7 +35,30 @@ const PIN_BASE_M = 6.0;
 const PIN_REF_C = 26.0;
 const PIN_M_PER_C = 2.6;
 const PIN_MAX_RISE_C = 22.0;
-const PIN_RADIUS_M = 2.1;
+const PIN_RADIUS_M = 3.0;
+
+/**
+ * Metres per screen pixel at which pins are drawn at true world scale.
+ *
+ * Below that the profile is scaled up so it keeps roughly the same apparent size
+ * instead of vanishing. This is not cosmetic: the app fits the whole route on
+ * screen the moment you plan one, and at that zoom a 3 m pin is a fifth of a pixel
+ * wide. Scaling radius and height by the same factor keeps the bar chart's relative
+ * shape exact — only its size on screen is held steady, the way a chart's axes do
+ * not shrink when you look at more of it.
+ */
+const PIN_REF_M_PER_PX = 1.15;
+/** Ceiling on the width scaling — enough to stay visible, not enough to merge. */
+const PIN_MAX_RADIUS_SCALE = 5.0;
+/** Height grows more slowly and stops sooner. Scaling it as hard as the width turned
+ *  the profile into a 96 m wall at route-fitted zoom: solid, and unreadable as a
+ *  profile, which is the only reason it exists. */
+const PIN_MAX_HEIGHT_SCALE = 2.6;
+/** Target gap between pins on screen, in pixels. As the camera pulls back the pins
+ *  are thinned to hold roughly this spacing, so they stay countable marks instead of
+ *  fusing into a ribbon — the same level-of-detail decimation a map label engine
+ *  does, and for the same reason. */
+const PIN_TARGET_PX_GAP = 15.0;
 
 /** Hard cap on instances, so a pathological route cannot allocate without bound. */
 const MAX_PINS = 4000;
@@ -47,6 +70,8 @@ attribute float aSeed;
 
 uniform vec2 uExtent;
 uniform float uGrow;        // 0..1 reveal animation when a new route lands
+uniform float uPinRadiusScale;   // screen-size compensation for width
+uniform float uPinHeightScale;   // ...and, more gently, for height
 varying float vFeels;
 varying float vUp;          // 0 at the foot of the pin, 1 at its cap
 varying vec2 vGround;
@@ -63,13 +88,13 @@ void main() {
   vFeels = feels;
 
   float rise = clamp(feels - ${PIN_REF_C.toFixed(1)}, 0.0, ${PIN_MAX_RISE_C.toFixed(1)});
-  float h = (${PIN_BASE_M.toFixed(1)} + rise * ${PIN_M_PER_C.toFixed(1)}) * uGrow;
+  float h = (${PIN_BASE_M.toFixed(1)} + rise * ${PIN_M_PER_C.toFixed(1)}) * uGrow * uPinHeightScale;
 
   // The cylinder is authored unit-height along z with its base at 0, so scaling z
   // grows it upward from the pavement rather than about its middle.
   vec3 local = position;
   vUp = local.z;
-  local.xy *= ${PIN_RADIUS_M.toFixed(1)};
+  local.xy *= ${PIN_RADIUS_M.toFixed(1)} * uPinRadiusScale;
   local.z *= h;
 
   vNormal = normalize(mat3(instanceMatrix) * normal);
@@ -124,6 +149,10 @@ export class RoutePins {
   readonly mesh: THREE.InstancedMesh;
   private readonly material: THREE.ShaderMaterial;
   private readonly capacity = MAX_PINS;
+  /** Every resampled point on the route, in local metres. The instance buffer holds
+   *  a stride-decimated subset of these, chosen for the current camera. */
+  private points: Array<[number, number]> = [];
+  private stride = 1;
 
   constructor(
     private readonly fields: TwinFields,
@@ -150,6 +179,8 @@ export class RoutePins {
         uSunColor: { value: new THREE.Color(1, 0.94, 0.86) },
         uSunIntensity: { value: 0 },
         uGrow: { value: 1 },
+        uPinRadiusScale: { value: 1 },
+        uPinHeightScale: { value: 1 },
         uReveal: { value: reveal },
         uRevealOn: { value: 0 },
       },
@@ -179,36 +210,36 @@ export class RoutePins {
    * a density map of the road network instead of an evenly-paced profile.
    */
   setRoute(coords: [number, number][]) {
-    if (coords.length < 2) {
-      this.mesh.count = 0;
-      return;
+    this.points = [];
+    if (coords.length >= 2) {
+      const pts = coords.map(([la, lo]) => this.fields.origin.toXY(la, lo));
+      this.points.push([pts[0][0], pts[0][1]]);
+      let carry = 0;
+      for (let i = 0; i < pts.length - 1 && this.points.length < this.capacity; i++) {
+        const [ax, ay] = pts[i];
+        const [bx, by] = pts[i + 1];
+        const seg = Math.hypot(bx - ax, by - ay);
+        if (seg < 1e-6) continue;
+        let d = PIN_SPACING_M - carry;
+        while (d <= seg && this.points.length < this.capacity) {
+          this.points.push([ax + ((bx - ax) * d) / seg, ay + ((by - ay) * d) / seg]);
+          d += PIN_SPACING_M;
+        }
+        carry = (carry + seg) % PIN_SPACING_M;
+      }
     }
-    const pts = this.fields.origin ? coords.map(([la, lo]) => this.fields.origin.toXY(la, lo)) : [];
+    this.upload();
+  }
+
+  /** Write the stride-decimated subset of `points` into the instance buffer. */
+  private upload() {
     const m = new THREE.Matrix4();
     let n = 0;
-    let carry = 0;
-
-    const place = (x: number, y: number) => {
-      if (n >= this.capacity) return;
-      m.makeTranslation(x, y, 0);
+    for (let i = 0; i < this.points.length && n < this.capacity; i += this.stride) {
+      m.makeTranslation(this.points[i][0], this.points[i][1], 0);
       this.mesh.setMatrixAt(n, m);
       n++;
-    };
-
-    place(pts[0][0], pts[0][1]);
-    for (let i = 0; i < pts.length - 1 && n < this.capacity; i++) {
-      const [ax, ay] = pts[i];
-      const [bx, by] = pts[i + 1];
-      const seg = Math.hypot(bx - ax, by - ay);
-      if (seg < 1e-6) continue;
-      let t = PIN_SPACING_M - carry;
-      while (t <= seg && n < this.capacity) {
-        place(ax + ((bx - ax) * t) / seg, ay + ((by - ay) * t) / seg);
-        t += PIN_SPACING_M;
-      }
-      carry = (carry + seg) % PIN_SPACING_M;
     }
-
     this.mesh.count = n;
     this.mesh.instanceMatrix.needsUpdate = true;
   }
@@ -219,6 +250,30 @@ export class RoutePins {
 
   get count() {
     return this.mesh.count;
+  }
+
+  /**
+   * Hold the profile at a readable size as the camera pulls back.
+   *
+   * `metresPerPixel` comes from the map each frame. Radius and height take the same
+   * factor so the relative heights — which are the data — are untouched.
+   */
+  setPixelScale(metresPerPixel: number) {
+    const raw = Math.max(1, metresPerPixel / PIN_REF_M_PER_PX);
+    const u = this.material.uniforms;
+    u.uPinRadiusScale.value = Math.min(PIN_MAX_RADIUS_SCALE, raw);
+    // Height deliberately lags the width: a pin that grows as fast in both stops
+    // being a bar and becomes a tower, and a row of towers is a wall.
+    u.uPinHeightScale.value = Math.min(PIN_MAX_HEIGHT_SCALE, Math.sqrt(raw));
+
+    // Thin the pins out so their on-screen spacing stays roughly constant.
+    const want = Math.max(
+      1, Math.round((PIN_TARGET_PX_GAP * metresPerPixel) / PIN_SPACING_M),
+    );
+    if (want !== this.stride) {
+      this.stride = want;
+      this.upload();
+    }
   }
 
   setSun(dir: THREE.Vector3, intensity: number, color: THREE.Color) {

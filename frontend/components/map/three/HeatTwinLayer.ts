@@ -163,6 +163,17 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     }
     this.buildings.setGrow(this.grow);
 
+    // Keep the route's temperature profile readable as the camera pulls back.
+    // Recomputed per frame rather than on a zoom event: MapLibre eases zoom over
+    // many frames, and sampling only at the ends makes the pins pop between sizes.
+    if (this.pins && this.map) {
+      const z = this.map.getZoom();
+      const lat = (this.map.getCenter().lat * Math.PI) / 180;
+      const mpp = (156543.03392 * Math.cos(lat)) / Math.pow(2, z);
+      this.pins.setPixelScale(mpp);
+      this.roads?.setPixelScale(mpp);
+    }
+
     if (this.plantGrow < 1) {
       this.plantGrow = Math.min(1, this.plantGrow + 0.05);
       this.trees.setPlantGrow(this.plantGrow);

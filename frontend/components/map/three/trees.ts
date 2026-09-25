@@ -36,21 +36,54 @@ uniform float uPlantGrow;
 uniform vec2 uExtent;
 ${LIFT_GLSL}
 
+float hash(float n) { return fract(sin(n * 43758.5453) * 12345.6789); }
+
 void main() {
   vDensity = aDensity;
   vSeed = aSeed;
   vPlanted = aPlanted;
 
   float grow = mix(1.0, uPlantGrow, aPlanted);
-  vec3 local = position * aRadius * grow;
-  // squash slightly so canopies read as crowns rather than beach balls
-  local.z *= 0.78;
+
+  // --- crown shaping -----------------------------------------------------------
+  // The base mesh is a subdivided icosahedron: a ball. Squashing it was never going
+  // to read as foliage, because what makes a crown recognisable is not its
+  // proportions but its irregularity — no tree is a surface of revolution.
+  //
+  // Shaped in the vertex shader rather than with denser geometry: the zone carries
+  // ~34k canopies and every subdivision multiplies that. This costs nothing and,
+  // because the displacement is driven by the tree's own seed, each one keeps a
+  // distinct silhouette that is identical on every reload.
+  vec3 d = normalize(position);
+  float up = d.z * 0.5 + 0.5;            // 0 at the underside, 1 at the top
+
+  // Profile: pinched underneath where the trunk enters, widest just above the
+  // middle, rounded off at the top.
+  float profile = mix(0.58, 1.06, smoothstep(0.0, 0.46, up))
+                * mix(1.0, 0.74, smoothstep(0.60, 1.0, up));
+
+  // Lobes: a few low-frequency bumps at seeded phases, which is what separates a
+  // crown from a sphere at silhouette distance.
+  float az = atan(d.y, d.x);
+  float lobe = 1.0
+    + 0.17 * sin(az * 3.0 + hash(aSeed) * 6.2832)
+    + 0.11 * sin(az * 5.0 + hash(aSeed + 3.0) * 6.2832)
+    + 0.09 * sin(d.z * 4.5 + hash(aSeed + 7.0) * 6.2832);
+
+  vec3 local = d * aRadius * grow * profile * lobe;
+  local.z *= 0.86;
+  // Crowns lean; a stable per-tree offset that grows with height keeps a stand of
+  // trees from looking stamped from one mould.
+  local.xy += (vec2(hash(aSeed + 11.0), hash(aSeed + 13.0)) - 0.5) * aRadius * grow * 0.22 * up;
 
   vec4 world = instanceMatrix * vec4(local, 1.0);
   vGround = world.xy;
   // Stand on the vulnerability terrain with everything else.
   world.z += liftAt(clamp(vGround / uExtent, 0.0, 1.0));
-  vNormal = normalize(mat3(instanceMatrix) * normal);
+  // The sphere direction, not the polyhedron's facet normal: shading then reads
+  // smooth across a low-poly crown while the silhouette stays irregular, which is
+  // the whole trick that lets 34k of these stay cheap.
+  vNormal = normalize(mat3(instanceMatrix) * d);
   gl_Position = projectionMatrix * modelViewMatrix * world;
 }`;
 
