@@ -41,7 +41,7 @@ export default function InterventionPanel({ compact = false }: { compact?: boole
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} aria-hidden />
           <div
-            className={`glass-strong absolute right-0 z-20 w-[300px] ${compact ? "top-full mt-3" : "bottom-full mb-3"} rounded-[26px] p-4 pop-in`}
+            className={`glass-strong z-20 rounded-[26px] p-4 pop-in ${compact ? "fixed top-[72px] right-[76px] w-[min(300px,calc(100vw-100px))] max-h-[calc(100dvh-140px)] overflow-y-auto" : "absolute right-0 bottom-full mb-3 w-[300px]"}`}
             role="dialog"
             aria-label="Intervention simulator"
           >
@@ -113,7 +113,7 @@ export default function InterventionPanel({ compact = false }: { compact?: boole
           if (picking) set({ pickMode: null });
           setOpen((o) => !o);
         }}
-        className={`press glass flex items-center justify-center gap-2 rounded-full text-[14px] font-semibold ${compact ? "w-11 h-11" : "h-12 pl-3.5 pr-4"} ${picking ? "glow-pulse bg-ink-100 text-ink-950" : ""}`}
+        className={`press flex items-center justify-center gap-2 rounded-full text-[14px] font-semibold ${compact ? "w-11 h-11" : "glass h-12 pl-3.5 pr-4"} ${picking ? "glow-pulse bg-ink-100 text-ink-950" : ""}`}
         aria-label="Simulate a street-cooling intervention"
         aria-expanded={open}
       >

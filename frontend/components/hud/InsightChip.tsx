@@ -14,7 +14,7 @@ export function InsightChip({ compact = false }: { compact?: boolean }) {
   const conv = (c: number) => (units === "F" ? (c * 9) / 5 + 32 : c);
   if (compact) {
     return (
-      <button onClick={() => set({ panel: "insight" })} className="press glass relative grid place-items-center w-11 h-11 rounded-full" aria-label="Heat insights">
+      <button onClick={() => set({ panel: "insight" })} className="press relative grid place-items-center w-11 h-11 rounded-full" aria-label="Heat insights">
         <span className="absolute inset-[5px] rounded-full" style={{ background: f ? `conic-gradient(from 200deg, ${heatColor(f.stats.street_min_c)}, ${heatColor(f.stats.street_max_c)}, ${heatColor(f.stats.street_min_c)})` : "#272523" }} />
         <span className="relative grid place-items-center w-7 h-7 rounded-full bg-ink-900 text-[10.5px] font-semibold tabular text-ink-100">{f ? Math.round(conv(f.stats.street_max_c)) : "–"}°</span>
       </button>

@@ -119,7 +119,6 @@ export default function TwinMap() {
   const geoStatus = useGeo((s) => s.status);
   const revealOn = useMap((s) => s.revealOn);
   const equityOn = useMap((s) => s.equityOn);
-  const myPendingPois = useMap((s) => s.myPendingPois);
   const [approvedPois, setApprovedPois] = useState<Awaited<ReturnType<typeof api.communityPois>> | null>(null);
   const scenario = SCENARIO;
   const units = usePrefs((s) => s.units);
@@ -482,32 +481,30 @@ export default function TwinMap() {
     };
   }, [ready, equityOn, mode, nearest, scenario, tempDelta, base, layerEpoch]);
 
-  // ───────── crowdsourced hydration/rest points (SDG 6) ─────────
+  // ───────── community-verified hydration/rest points (SDG 6) ─────────
   useEffect(() => {
     let dead = false;
     api.communityPois().then((r) => !dead && setApprovedPois(r)).catch(() => {});
     return () => {
       dead = true;
     };
-  }, [myPendingPois.length]);
+  }, []);
 
   useEffect(() => {
     const map = ready;
     communityMarkersRef.current.forEach((m) => m.remove());
     communityMarkersRef.current = [];
     if (!ready || !map) return;
-    const addMarker = (lat: number, lon: number, kind: string, name: string, pending: boolean) => {
+    const addMarker = (lat: number, lon: number, kind: string, name: string) => {
       const color = POI_STYLE[kind as keyof typeof POI_STYLE]?.color ?? "#9dc06a";
       const d = document.createElement("div");
       d.className = "hm-community-pin";
       d.style.setProperty("--c", color);
-      if (pending) d.classList.add("pending");
-      d.title = `${esc(name)} (${kind}) — ${pending ? "pending review" : "community-verified"}`;
+      d.title = `${esc(name)} (${kind}) — community-verified`;
       communityMarkersRef.current.push(new maplibregl.Marker({ element: d, anchor: "center" }).setLngLat([lon, lat]).addTo(map));
     };
-    approvedPois?.features.forEach((f) => addMarker(f.geometry.coordinates[1], f.geometry.coordinates[0], f.properties.kind, f.properties.name, false));
-    myPendingPois.forEach((p) => addMarker(p.lat, p.lon, p.kind, p.name, true));
-  }, [ready, approvedPois, myPendingPois]);
+    approvedPois?.features.forEach((f) => addMarker(f.geometry.coordinates[1], f.geometry.coordinates[0], f.properties.kind, f.properties.name));
+  }, [ready, approvedPois]);
 
   // ───────── POIs ─────────
   useEffect(() => {
@@ -647,10 +644,6 @@ export default function TwinMap() {
         const r = await runIntervention(ev.lngLat.lat, ev.lngLat.lng, kind as InterventionKind);
         if (r) popup.setHTML(interventionPopupHtml(r, usePrefs.getState().units));
         else popup.setHTML('<div style="font-size:12px">Could not simulate that here — try a spot on open ground or a street.</div>');
-        return;
-      }
-      if (st.pickMode === "add_poi") {
-        useMap.getState().set({ addPoiDraft: { lat: ev.lngLat.lat, lon: ev.lngLat.lng } });
         return;
       }
       const hit = map.queryRenderedFeatures(ev.point, { layers: ["route-halo"] })[0];

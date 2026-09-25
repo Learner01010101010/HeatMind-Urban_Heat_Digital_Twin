@@ -41,7 +41,7 @@ export default function SimulateButton({ compact = false }: { compact?: boolean 
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} aria-hidden />
-          <div className={`glass-strong absolute right-0 z-20 w-[290px] ${compact ? "top-full mt-3" : "bottom-full mb-3"} rounded-[26px] p-4 pop-in`} role="dialog" aria-label="Simulate conditions">
+          <div className={`glass-strong z-20 rounded-[26px] p-4 pop-in ${compact ? "fixed top-[72px] right-[76px] w-[min(290px,calc(100vw-100px))] max-h-[calc(100dvh-140px)] overflow-y-auto" : "absolute right-0 bottom-full mb-3 w-[290px]"}`} role="dialog" aria-label="Simulate conditions">
             <div className="flex items-baseline justify-between mb-1">
               <div className="text-[15px] font-semibold text-ink-100 tracking-tight">What if it gets hotter?</div>
               <div className="text-[22px] font-semibold tabular tracking-tight" style={{ color: d > 0 ? "#fb8a1f" : d < 0 ? "#9dc06a" : "#f3f3f2" }}>
@@ -98,7 +98,7 @@ export default function SimulateButton({ compact = false }: { compact?: boolean 
       )}
       <button
         onClick={() => setOpen((o) => !o)}
-        className={`press glass flex items-center justify-center gap-2 rounded-full text-[14px] font-semibold ${compact ? "w-11 h-11" : "h-12 pl-3.5 pr-4"} ${active ? "glow-pulse" : ""}`}
+        className={`press flex items-center justify-center gap-2 rounded-full text-[14px] font-semibold ${compact ? "w-11 h-11" : "glass h-12 pl-3.5 pr-4"} ${active ? "glow-pulse" : ""}`}
         aria-label="Simulate a temperature change"
         style={active ? { background: "linear-gradient(135deg, rgba(251,138,31,.95), rgba(239,68,68,.9))", color: "#fff" } : undefined}
         aria-expanded={open}

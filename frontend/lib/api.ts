@@ -380,15 +380,6 @@ export interface OpenDataCatalog {
 
 export type CommunityPoiKind = "water" | "rest" | "shade";
 
-export interface CommunityPoiSubmitResult {
-  id: number;
-  status: "pending";
-  kind: CommunityPoiKind;
-  name: string;
-  lat: number;
-  lon: number;
-}
-
 export type InterventionKind = "trees" | "cool_pavement" | "shade_structure";
 
 export interface InterventionInfo {
@@ -503,8 +494,6 @@ export const api = {
     req<EquityIndex>(`/api/equity/index?${qs(p)}`, { signal }),
   plannerReport: (p: { scenario: Scenario; time?: string; offset_min?: number; temp_delta?: number; top_n?: number }) =>
     req<PlannerReport>(`/api/planner/report?${qs(p)}`),
-  submitCommunityPoi: (body: { session_token: string; lat: number; lon: number; kind: CommunityPoiKind; name: string; note?: string }) =>
-    req<CommunityPoiSubmitResult>("/api/community/pois", { method: "POST", json: body }),
   communityPois: () => req<GeoJSON.FeatureCollection<GeoJSON.Point, { kind: CommunityPoiKind; name: string; status: string; source: "community" }>>("/api/community/pois?status=approved"),
   openDataCatalog: () => req<OpenDataCatalog>("/api/open-data"),
   intervene: (p: {
