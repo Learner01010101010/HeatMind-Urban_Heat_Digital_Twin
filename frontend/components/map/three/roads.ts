@@ -21,6 +21,11 @@ import { REVEAL_GLSL } from "./reveal";
 
 // Ribbon z, just above the basemap and below GroundHeat's 0.05.
 const ROAD_Z = 0.02;
+/** Narrowest a road may be drawn, in screen pixels, however far the camera is. */
+const MIN_ROAD_PX = 1.7;
+/** ...but never widened past this in world metres, or the city becomes a grey mat
+ *  and the class tones stop showing any hierarchy. */
+const MAX_MIN_WIDTH_M = 13.0;
 
 const CLASS_INDEX: Record<string, number> = {
   trunk: 0, trunk_link: 0, primary: 1, secondary: 2, tertiary: 3,
@@ -52,6 +57,9 @@ attribute float aAlong;    // metres travelled along the way
 attribute float aAcross;   // -1 at one kerb, +1 at the other
 attribute float aClass;
 attribute float aWidth;
+attribute vec2 aOffset;    // unit perpendicular; the shader sets the actual width
+
+uniform float uMinWidthM;  // narrowest a road may be drawn, in metres
 
 varying float vAlong;
 varying float vAcross;
@@ -66,9 +74,17 @@ void main() {
   vAlong = aAlong;
   vAcross = aAcross;
   vClass = aClass;
-  vWidth = aWidth;
-  vGround = position.xy;
+  // Width is applied here rather than baked into the geometry so a service lane can
+  // be held to a minimum number of screen pixels. A 2 m alley is a third of a pixel
+  // at the zoom that fits a cross-city route, which is why the small streets
+  // disappeared entirely when the zone grew. The centreline stays put; only the
+  // kerb offset grows.
+  float wEff = max(aWidth, uMinWidthM);
+  vWidth = wEff;
+
   vec3 p = position;
+  p.xy += aOffset * (wEff * 0.5);
+  vGround = p.xy;
   p.z += liftAt(clamp(vGround / uExtent, 0.0, 1.0));
   gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
 }`;
@@ -194,21 +210,24 @@ export class Roads {
     }
 
     const pos = new Float32Array(vertexCount * 3);
+    const off = new Float32Array(vertexCount * 2);
     const along = new Float32Array(vertexCount);
     const across = new Float32Array(vertexCount);
     const cls = new Float32Array(vertexCount);
     const wid = new Float32Array(vertexCount);
     let v = 0;
 
-    const push = (x: number, y: number, s: number, t: number, k: number, w: number) => {
-      pos[v * 3] = x; pos[v * 3 + 1] = y; pos[v * 3 + 2] = ROAD_Z;
+    // (cx, cy) is the centreline; (ox, oy) is the unit direction out to the kerb.
+    const push = (cx: number, cy: number, ox: number, oy: number,
+                  s: number, t: number, k: number, w: number) => {
+      pos[v * 3] = cx; pos[v * 3 + 1] = cy; pos[v * 3 + 2] = ROAD_Z;
+      off[v * 2] = ox; off[v * 2 + 1] = oy;
       along[v] = s; across[v] = t; cls[v] = k; wid[v] = w;
       v++;
     };
 
     for (const road of prepared) {
       const { pts, k, w, caps } = road;
-      const half = w / 2;
       let run = 0;
 
       for (let i = 0; i < pts.length - 1; i++) {
@@ -225,12 +244,12 @@ export class Roads {
         const s1 = run + len;
         run = s1;
 
-        push(a.x + nx * half, a.y + ny * half, s0, 1, k, w);
-        push(a.x - nx * half, a.y - ny * half, s0, -1, k, w);
-        push(b.x - nx * half, b.y - ny * half, s1, -1, k, w);
-        push(a.x + nx * half, a.y + ny * half, s0, 1, k, w);
-        push(b.x - nx * half, b.y - ny * half, s1, -1, k, w);
-        push(b.x + nx * half, b.y + ny * half, s1, 1, k, w);
+        push(a.x, a.y, nx, ny, s0, 1, k, w);
+        push(a.x, a.y, -nx, -ny, s0, -1, k, w);
+        push(b.x, b.y, -nx, -ny, s1, -1, k, w);
+        push(a.x, a.y, nx, ny, s0, 1, k, w);
+        push(b.x, b.y, -nx, -ny, s1, -1, k, w);
+        push(b.x, b.y, nx, ny, s1, 1, k, w);
 
         // A round cap fills the wedge two straight ribbons leave at a real bend.
         // Cheaper and far more robust than mitring, which blows up at the
@@ -239,9 +258,9 @@ export class Roads {
           for (let j = 0; j < CAP_SEGMENTS; j++) {
             const t0 = (j / CAP_SEGMENTS) * Math.PI * 2;
             const t1 = ((j + 1) / CAP_SEGMENTS) * Math.PI * 2;
-            push(a.x, a.y, s0, 0, k, w);
-            push(a.x + Math.cos(t0) * half, a.y + Math.sin(t0) * half, s0, 0.9, k, w);
-            push(a.x + Math.cos(t1) * half, a.y + Math.sin(t1) * half, s0, 0.9, k, w);
+            push(a.x, a.y, 0, 0, s0, 0, k, w);
+            push(a.x, a.y, Math.cos(t0), Math.sin(t0), s0, 0.9, k, w);
+            push(a.x, a.y, Math.cos(t1), Math.sin(t1), s0, 0.9, k, w);
           }
         }
       }
@@ -254,6 +273,7 @@ export class Roads {
     geo.setAttribute("aAcross", new THREE.BufferAttribute(across.subarray(0, used), 1));
     geo.setAttribute("aClass", new THREE.BufferAttribute(cls.subarray(0, used), 1));
     geo.setAttribute("aWidth", new THREE.BufferAttribute(wid.subarray(0, used), 1));
+    geo.setAttribute("aOffset", new THREE.BufferAttribute(off.subarray(0, used * 2), 2));
     geo.computeBoundingSphere();
 
     const tones: THREE.Color[] = [];
@@ -274,6 +294,7 @@ export class Roads {
         uCentreline: { value: HAS_CENTRELINE },
         uReveal: { value: reveal },
         uRevealOn: { value: 0 },
+        uMinWidthM: { value: 0 },
         ...lift,
       },
       depthWrite: false,
@@ -282,6 +303,18 @@ export class Roads {
     this.mesh = new THREE.Mesh(geo, this.material);
     this.mesh.renderOrder = 0; // under GroundHeat, so the heat tints the carriageway
     this.triangles = used / 3;
+  }
+
+  /**
+   * Hold minor streets at a readable width as the camera pulls back.
+   *
+   * Capped, because past a point every service lane widening further turns the city
+   * into a solid grey mat and hides the hierarchy the tones are there to show.
+   */
+  setPixelScale(metresPerPixel: number) {
+    this.material.uniforms.uMinWidthM.value = Math.min(
+      MAX_MIN_WIDTH_M, MIN_ROAD_PX * metresPerPixel,
+    );
   }
 
   setSun(intensity: number, color: THREE.Color) {
