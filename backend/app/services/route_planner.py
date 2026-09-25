@@ -12,6 +12,7 @@ import numpy as np
 from . import geo
 from .explanation_service import explain
 from .heat_twin_service import get_twin
+from . import break_planner
 from .prediction_service import TIMELINE_OFFSETS
 from .risk_scoring import CAUTION_C, PERSONAS, score_route
 from .routing_service import Path, StreetGraph
@@ -261,6 +262,14 @@ class RoutePlanner:
                             intensity=cond["intensity"], poi_positions_m=stop_pos, total_m=total)
             if scored0 is None:
                 scored0 = s
+                # The hydration and rest plan belongs to the walk you are about to
+                # take, so it is built from the same arrival-time conditions the
+                # headline score uses rather than from a snapshot.
+                breaks = break_planner.plan(
+                    persona=persona, minutes=secs / 60.0, cum_m=cum,
+                    feels=cond["feels"], exposure=cond["exposure"],
+                    intensity=cond["intensity"], rh=f.weather.rh,
+                    along=along, total_m=total, depart=f.when)
             forecast.append({"offset_min": off, "time": f.when.isoformat(), "score": s["score"], "band": s["band"],
                              "heat_dose": s["metrics"]["heat_dose"], "pct_shaded": s["metrics"]["pct_shaded"],
                              "peak_feels_c": s["metrics"]["peak_feels_c"]})
@@ -298,6 +307,7 @@ class RoutePlanner:
             "distance_m": scored0["metrics"]["distance_m"],
             "heat_risk_score": scored0["score"], "band": scored0["band"], "factors": scored0["factors"],
             "metrics": scored0["metrics"], "pois_along_route": along, "segments": segs, "forecast": forecast,
+            "breaks": breaks,
         }
 
     def _fallback_name(self, road_i: int) -> str:

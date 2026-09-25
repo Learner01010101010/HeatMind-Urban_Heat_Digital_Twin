@@ -87,6 +87,11 @@ COLOR_MAX_C = 56.0
 # modelled Pune congestion curve and says so in /api/meta — it never fabricates a
 # live reading. Set it in backend/.env, which is gitignored.
 TOMTOM_KEY = os.environ.get("HEATMIND_TOMTOM_KEY", "")
+# Optional. Street-level photos for a water stop come from Mapillary when this
+# is set; the endpoint reports "no provider" and the client falls back to the
+# twin's own view of the spot when it is not. Server side only -- the browser
+# never sees it and never calls Mapillary directly.
+MAPILLARY_TOKEN = os.environ.get("HEATMIND_MAPILLARY_TOKEN", "")
 
 # Optional LLM polish for explanations (never blocks the UI)
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")

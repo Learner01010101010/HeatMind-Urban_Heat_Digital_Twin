@@ -148,6 +148,7 @@ export interface Route {
   factors: Factor[];
   metrics: RouteMetrics;
   pois_along_route: Poi[];
+  breaks: BreakPlan;
   segments: Segment[];
   forecast: ForecastPoint[];
   tradeoff: { extra_min: number; dose_change_pct: number; score_change: number; shade_change_pts: number };
@@ -310,6 +311,61 @@ export interface PackedBuildings {
   seed: number[];
   off: number[];
   xy: number[];
+}
+
+
+/**
+ * Where to drink and where to rest on this route, worked out from the walk itself.
+ * See services/break_planner.py — sweat loss from felt temperature, direct sun and
+ * pace; rest intervals additionally discounted by how little of that sweat can
+ * evaporate at today's humidity.
+ */
+export interface BreakStop {
+  type: "water" | "rest" | "water+rest";
+  at_m: number;
+  eta_min: number;
+  eta: string;
+  lat: number | null;
+  lon: number | null;
+  /** null when nothing is mapped within reach — the stop is still real, the tap is not. */
+  poi: {
+    id: string;
+    name: string;
+    type: Poi["type"];
+    detail: string;
+    water_kind: "tap" | "buy" | "indoor";
+    source: string;
+    off_route_m: number;
+  } | null;
+  has_source: boolean;
+  fluid_ml: number;
+  rest_min: number;
+  feels_c: number;
+  exposure: number;
+  why: string;
+  advice: string;
+}
+
+export interface BreakPlan {
+  stops: BreakStop[];
+  total_fluid_ml: number;
+  fluid_per_hour_ml: number;
+  humidity_pct: number;
+  evaporative_efficiency: number;
+  longest_dry_stretch_m: number;
+  longest_dry_stretch_min: number;
+  water_sources_on_route: number;
+  public_taps_on_route: number;
+  carry_water: boolean;
+  note: string;
+}
+
+export interface NearbyPhotos {
+  available: boolean;
+  reason: "ok" | "no_coverage" | "no_provider" | "provider_error";
+  note?: string;
+  attribution?: string;
+  photos: { id: string; url: string; captured_at?: number; bearing?: number }[];
 }
 
 export interface ZoneData {
@@ -532,6 +588,8 @@ export const api = {
     req<PlannerReport>(`/api/planner/report?${qs(p)}`),
   communityPois: () => req<GeoJSON.FeatureCollection<GeoJSON.Point, { kind: CommunityPoiKind; name: string; status: string; source: "community" }>>("/api/community/pois?status=approved"),
   openDataCatalog: () => req<OpenDataCatalog>("/api/open-data"),
+  photosNearby: (p: { lat: number; lon: number }) =>
+    req<NearbyPhotos>(`/api/photo/nearby?${qs(p)}`),
   intervene: (p: {
     lat: number;
     lon: number;

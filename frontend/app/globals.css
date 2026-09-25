@@ -227,6 +227,43 @@ html.senior {
 .hm-community-pin:hover {
   transform: scale(1.25);
 }
+/* ─── hydration / rest stops on a route ───
+   A filled drop is a stop with a real mapped source behind it; a hollow ring is a
+   stop the physiology called for where nothing is mapped within reach. The
+   difference matters more than the styling: one is somewhere to go, the other is a
+   warning to carry water. */
+.hm-break-pin {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px 999px 999px 2px;
+  transform: rotate(-45deg);
+  background: linear-gradient(140deg, #6fd0ff, #2f9bd6);
+  border: 2px solid #060606;
+  box-shadow: 0 2px 10px rgba(47, 155, 214, 0.55);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  color: #04121a;
+  font-size: 10px;
+  transition: transform 0.2s var(--ease-spring);
+}
+.hm-break-pin:hover {
+  transform: rotate(-45deg) scale(1.18);
+}
+.hm-break-pin[data-kind="rest"] {
+  background: linear-gradient(140deg, #ffd08a, #f2a33c);
+  box-shadow: 0 2px 10px rgba(242, 163, 60, 0.55);
+}
+.hm-break-pin[data-kind="water+rest"] {
+  background: linear-gradient(140deg, #9ee7a8, #46b36a);
+  box-shadow: 0 2px 10px rgba(70, 179, 106, 0.5);
+}
+.hm-break-pin.dry {
+  background: transparent;
+  border: 2px dashed #f2a33c;
+  box-shadow: none;
+}
+
 /* ─── range (timeline) ─── */
 input[type="range"].hm-range {
   -webkit-appearance: none;
