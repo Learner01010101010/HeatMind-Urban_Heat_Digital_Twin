@@ -4,8 +4,6 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
-import AddPoiButton from "@/components/hud/AddPoiButton";
-import AddPoiForm from "@/components/hud/AddPoiForm";
 import EquityToggle from "@/components/hud/EquityToggle";
 import { InsightChip, InsightPanel } from "@/components/hud/InsightChip";
 import InterventionPanel from "@/components/hud/InterventionPanel";
@@ -31,7 +29,6 @@ function pickModeLabel(pickMode: PickMode): string {
   if (pickMode === "trees" || pickMode === "cool_pavement" || pickMode === "shade_structure") {
     return `Tap the map to preview ${INTERVENTION_STYLE[pickMode].short.toLowerCase()} here`;
   }
-  if (pickMode === "add_poi") return "Tap the map where the water/rest/shade point is";
   return "";
 }
 
@@ -84,10 +81,18 @@ export default function Home() {
             <SearchPill />
           </div>
           <div className="pointer-events-auto ml-auto flex items-center gap-2.5">
-            <div className="hidden md:block">
+            {/* The global nav is fixed to the centre of this same bar, so the view
+                controls have to fit in what's left of it. Full-width pills need
+                1152px before they clear the nav; below that they collapse to one
+                grouped pill of icons rather than being drawn straight through. */}
+            <div className="hidden md:flex xl:hidden glass rounded-full p-1.5 gap-1">
+              <ModeToggle compact />
+              <EquityToggle compact />
+            </div>
+            <div className="hidden xl:block">
               <ModeToggle />
             </div>
-            <div className="hidden md:block">
+            <div className="hidden xl:block">
               <EquityToggle />
             </div>
             <ProfileButton />
@@ -98,16 +103,22 @@ export default function Home() {
       {/* ── desktop: routes dock on the LEFT, below search, out of the map's centre ── */}
       {wide && sheet && <div className="absolute left-5 top-[84px] z-30">{sheet}</div>}
 
-      {/* ── phone: small round controls on the right edge ── */}
+      {/* ── phone: one control rail on the right edge ──
+           Grouped into a single surface rather than a column of free-floating
+           circles: seven identical dark dots down the side of a phone read as
+           clutter over the map, and gave no hint which of them do related jobs.
+           The dividers do that instead — what you're looking at, what it says,
+           what you can change. */}
       {!wide && (
-        <div className="absolute right-3 top-[76px] z-30 flex flex-col gap-2.5">
+        <div className="absolute right-3 top-[76px] z-30 glass rounded-[26px] p-1.5 flex flex-col gap-1">
           <ModeToggle compact />
           <EquityToggle compact />
+          <span className="h-px mx-2.5 bg-white/[0.07]" aria-hidden />
           <InsightChip compact />
+          <span className="h-px mx-2.5 bg-white/[0.07]" aria-hidden />
           <MyLocation compact />
           <SimulateButton compact />
           <InterventionPanel compact />
-          <AddPoiButton compact />
         </div>
       )}
 
@@ -132,7 +143,6 @@ export default function Home() {
             <Timeline />
           </div>
           <div className="pointer-events-auto shrink-0 flex items-end gap-3">
-            <AddPoiButton />
             <InterventionPanel />
             <SimulateButton />
             <MyLocation />
@@ -155,7 +165,6 @@ export default function Home() {
         <ProfilePanel />
       </Drawer>
 
-      <AddPoiForm />
     </main>
   );
 }

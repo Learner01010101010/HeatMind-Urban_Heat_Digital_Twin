@@ -31,8 +31,8 @@ export default function GlobalNav() {
               title={it.label}
             >
               <it.icon size={16} />
-              <span className="hidden xl:inline">{it.label}</span>
-              {it.href === "/passport" && <span className="xl:hidden">Passport</span>}
+              <span className="hidden 2xl:inline">{it.label}</span>
+              {it.href === "/passport" && <span className="2xl:hidden">Passport</span>}
             </Link>
           );
         })}

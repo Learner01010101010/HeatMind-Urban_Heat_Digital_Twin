@@ -1,0 +1,3 @@
+# Build-time only -- the runtime backend needs none of this.
+# Overture Maps buildings are distributed as GeoParquet on S3.
+pyarrow==25.0.1

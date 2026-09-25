@@ -1,6 +1,7 @@
 """Loads the zone dataset and rasterises it into the static layers of the digital twin."""
 from __future__ import annotations
 
+import base64
 import json
 import math
 from functools import lru_cache
@@ -60,7 +61,45 @@ def box_blur(a: np.ndarray, radius_cells: int) -> np.ndarray:
     return out
 
 
+def _seed(osm_id: object) -> int:
+    """Stable per-building integer for procedural facade variation.
+
+    Was `int(osm_id) & 0xFFFF`, which assumed the id was an OSM way number. Overture
+    footprints are UUIDs, so that raised on every request the moment the measured
+    footprint set landed. Hashing the string instead works for both and keeps the
+    property this is here for: the same building gets the same facade on every load.
+    """
+    h = 0
+    for ch in str(osm_id):
+        h = (h * 131 + ord(ch)) & 0xFFFFFFFF
+    return h & 0xFFFF
+
+
 class Zone:
+
+    # ESA WorldCover class -> the twin's surface class. Built-up land that is not a
+    # building or a road is yard, compound and hardstanding, which behaves like the
+    # bare/dry-ground default rather than like a lawn.
+    _WORLDCOVER_SURFACE = {
+        10: "grass", 20: "grass", 30: "grass", 40: "grass", 95: "grass",
+        50: "bare", 60: "bare", 70: "bare", 100: "bare",
+        80: "water", 90: "water",
+    }
+
+    def _landcover_surface(self, R: int, C: int) -> np.ndarray:
+        """Surface classes seeded from ESA WorldCover, or all-bare if it is absent."""
+        out = np.zeros((R, C), dtype=np.int8)
+        b64 = self.data.get("landcover_b64") or ""
+        if not b64:
+            return out
+        raw = np.frombuffer(base64.b64decode(b64), dtype=np.uint8)
+        if raw.size != R * C:
+            return out
+        lc = raw.reshape(R, C)
+        for wc, name in self._WORLDCOVER_SURFACE.items():
+            out[lc == wc] = SURFACES[name][0]
+        return out
+
     def __init__(self) -> None:
         if not ZONE_FILE.exists():
             build_zone()
@@ -68,7 +107,14 @@ class Zone:
         R, C = geo.ROWS, geo.COLS
         self.shape = (R, C)
 
-        surface = np.zeros((R, C), dtype=np.int8)  # default: open dry ground
+        # Ground cover starts from what satellite land cover actually sees, not from
+        # "assume bare earth everywhere OSM did not draw a polygon". That default was
+        # wrong over most of this zone -- grass radiates at a surface gain of 6 against
+        # bare ground's 16, so every unmapped field and verge was being modelled about
+        # ten degrees too hot at the surface. OSM polygons, roads and buildings still
+        # override it below, because a mapped park boundary is better than a 10 m
+        # raster and a road is a road whatever the land cover says.
+        surface = self._landcover_surface(R, C)
         for s in sorted(self.data["surfaces"], key=lambda s: -s["area_m2"]):
             m = geo.polygon_mask([geo.to_xy(*p) for p in s["ring"]])
             if m:
@@ -114,7 +160,15 @@ class Zone:
         # Only the TRUNK is filtered. Canopy is still free to overhang the road, because
         # that overhang is exactly what shades a street; removing it would delete the
         # cooling effect the whole product exists to show.
-        self.trees = [t for t in self.data["trees"] if not self._on_carriageway(t["lat"], t["lon"])]
+        # The carriageway test applies to mapped trunks only. An OSM `natural=tree`
+        # node is a trunk, and a trunk standing in a traffic lane is a seeding bug.
+        # A canopy cell from the height raster is not a trunk -- it is measured
+        # canopy, and canopy over a carriageway is a street tree overhanging the
+        # road, which is the single most valuable shade in the whole model. Filtering
+        # those out threw away 18,004 cells of real measured shade over exactly the
+        # surfaces the router is trying to keep people off.
+        self.trees = [t for t in self.data["trees"]
+                      if t.get("source") != "osm" or not self._on_carriageway(t["lat"], t["lon"])]
         self.trees_dropped_on_road = len(self.data["trees"]) - len(self.trees)
 
         canopy = np.zeros((R, C))
@@ -217,9 +271,70 @@ class Zone:
                 "properties": {"name": b["name"], "kind": b["kind"], "height_m": b["height_m"],
                                "height_source": b["height_source"], "area_m2": b["area_m2"],
                                "typology": typology, "typology_source": src,
-                               "seed": int(b["osm_id"]) & 0xFFFF},
+                               "seed": _seed(b["osm_id"])},
                 "geometry": {"type": "Polygon", "coordinates": [[[lo, la] for la, lo in b["ring"]]]}})
         return {"type": "FeatureCollection", "features": feats}
+
+    def buildings_packed(self) -> dict:
+        """The same footprints as buildings_geojson(), as parallel arrays.
+
+        GeoJSON costs about 90 bytes of `{"type":"Feature","properties":{...}}`
+        scaffolding per building, and the measured footprint set is 56,276 of them:
+        the wrapper and the five properties nothing renders were 13 MB of a 21 MB
+        payload. Packed, the same information is 7 MB, and the client rebuilds
+        whatever shape it needs from arrays that parse an order of magnitude faster
+        than 56,276 nested objects.
+
+        Coordinates are 6 decimal places -- 11 cm, which is already well past the
+        accuracy of a satellite-detected footprint.
+        """
+        from .building_types import classify_cached
+        types = classify_cached(self)
+        typologies: list[str] = []
+        sources: list[str] = []
+        t_index: dict[str, int] = {}
+        s_index: dict[str, int] = {}
+        h: list[float] = []
+        t: list[int] = []
+        hs: list[int] = []
+        seeds: list[int] = []
+        off: list[int] = [0]
+        xy: list[float] = []
+
+        for b in self.data["buildings"]:
+            typology, _ = types.get(b["id"], ("residential", "inferred"))
+            if typology not in t_index:
+                t_index[typology] = len(typologies)
+                typologies.append(typology)
+            src = b.get("height_source", "satellite")
+            if src not in s_index:
+                s_index[src] = len(sources)
+                sources.append(src)
+            h.append(b["height_m"])
+            t.append(t_index[typology])
+            hs.append(s_index[src])
+            seeds.append(_seed(b["osm_id"]))
+            for la, lo in b["ring"]:
+                xy.append(round(lo, 6))
+                xy.append(round(la, 6))
+            off.append(len(xy) // 2)
+
+        return {"n": len(h), "typologies": typologies, "height_sources": sources,
+                "h": h, "t": t, "hs": hs, "seed": seeds, "off": off, "xy": xy}
+
+    def trees_packed(self) -> list[float]:
+        """[lon, lat, radius_m, density] per tree, flat.
+
+        85,771 trees as GeoJSON points is 11 MB of Feature wrappers around four
+        numbers each. Flat, it is 2.6 MB.
+        """
+        out: list[float] = []
+        for t in self.trees:
+            out.append(round(t["lon"], 6))
+            out.append(round(t["lat"], 6))
+            out.append(round(t["radius_m"], 2))
+            out.append(round(t["density"], 2))
+        return out
 
     def surfaces_geojson(self) -> dict:
         return {"type": "FeatureCollection", "features": [
@@ -241,6 +356,24 @@ class Zone:
              "geometry": {"type": "LineString",
                           "coordinates": [[round(lo, 7), round(la, 7)] for _, la, lo in r["nodes"]]}}
             for r in self.data["roads"]]}
+
+    def junctions(self) -> list[list[float]]:
+        """[lon, lat, radius_m] per connected node, as a flat list.
+
+        Flat rather than GeoJSON because there are tens of thousands of them and they
+        carry no properties worth naming -- the Feature wrapper would be most of the
+        payload. The renderer fills each one with a disc so the street network reads
+        as connected instead of as loose ribbons meeting at a notch.
+        """
+        return [[j["lon"], j["lat"], j["r_m"]] for j in self.data.get("junctions", [])]
+
+    def signals_geojson(self) -> dict:
+        """Traffic signals, crossings and give-ways, exactly where OSM maps them."""
+        return {"type": "FeatureCollection", "features": [
+            {"type": "Feature",
+             "properties": {"kind": s["kind"], "crossing": s.get("crossing", ""), "name": s.get("name", "")},
+             "geometry": {"type": "Point", "coordinates": [s["lon"], s["lat"]]}}
+            for s in self.data.get("signals", [])]}
 
     def trees_geojson(self) -> dict:
         return {"type": "FeatureCollection", "features": [

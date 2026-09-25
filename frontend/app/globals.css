@@ -227,13 +227,6 @@ html.senior {
 .hm-community-pin:hover {
   transform: scale(1.25);
 }
-.hm-community-pin.pending {
-  background: transparent;
-  border: 2px dashed var(--c, #9dc06a);
-  box-shadow: none;
-  opacity: 0.85;
-}
-
 /* ─── range (timeline) ─── */
 input[type="range"].hm-range {
   -webkit-appearance: none;

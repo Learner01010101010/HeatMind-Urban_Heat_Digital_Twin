@@ -249,14 +249,21 @@ export type Typology =
   | "shed"
   | "temple";
 
+/**
+ * What the packed payload actually carries per building.
+ *
+ * Name, kind, area and typology_source used to ride along and were never read by
+ * anything; height_source is kept because it is how the twin discloses a measured
+ * height from an inferred one.
+ */
 export interface BuildingProps {
-  name: string;
-  kind: string;
   height_m: number;
-  height_source: "osm" | "estimated";
-  area_m2: number;
+  /** satellite: measured from the 0.5 m height raster. satellite_low: measured, but
+   *  below the 2.5 m floor, so the footprint is a shed or a wall rather than a
+   *  storey. tagged: surveyed height or levels from OSM. typology: no measurement
+   *  reached this footprint, so it falls back to a class median. */
+  height_source: "satellite" | "satellite_low" | "tagged" | "typology";
   typology: Typology;
-  typology_source: "osm" | "inferred";
   seed: number;
 }
 
@@ -286,13 +293,42 @@ export interface AnthropogenicReport {
   note: string;
 }
 
+/**
+ * Buildings as parallel arrays rather than GeoJSON features.
+ *
+ * `off` holds N+1 ring-start indices into `xy`, which is a flat lon,lat run --
+ * building i owns xy[off[i]*2 .. off[i+1]*2). See Zone.buildings_packed(): the
+ * Feature wrapper and the properties nothing renders were 13 MB of a 21 MB payload.
+ */
+export interface PackedBuildings {
+  n: number;
+  typologies: string[];
+  height_sources: string[];
+  h: number[];
+  t: number[];
+  hs: number[];
+  seed: number[];
+  off: number[];
+  xy: number[];
+}
+
 export interface ZoneData {
   meta: { name: string; counts: Record<string, number> };
-  buildings: GeoJSON.FeatureCollection<GeoJSON.Polygon, BuildingProps>;
+  buildings: PackedBuildings;
   surfaces: GeoJSON.FeatureCollection;
   roads: GeoJSON.FeatureCollection<GeoJSON.LineString, RoadProps>;
-  trees: GeoJSON.FeatureCollection;
+  /** [lon, lat, radius_m] per connected road node — see Zone.junctions(). */
+  junctions: [number, number, number][];
+  signals: GeoJSON.FeatureCollection<GeoJSON.Point, SignalProps>;
+  /** [lon, lat, radius_m, density] per tree, flat — see Zone.trees_packed(). */
+  trees: number[];
   places: Place[];
+}
+
+export interface SignalProps {
+  kind: "traffic_signals" | "crossing" | "stop" | "give_way" | "mini_roundabout";
+  crossing: string;
+  name: string;
 }
 
 export interface PointSample {
@@ -379,15 +415,6 @@ export interface OpenDataCatalog {
 }
 
 export type CommunityPoiKind = "water" | "rest" | "shade";
-
-export interface CommunityPoiSubmitResult {
-  id: number;
-  status: "pending";
-  kind: CommunityPoiKind;
-  name: string;
-  lat: number;
-  lon: number;
-}
 
 export type InterventionKind = "trees" | "cool_pavement" | "shade_structure";
 
@@ -503,8 +530,6 @@ export const api = {
     req<EquityIndex>(`/api/equity/index?${qs(p)}`, { signal }),
   plannerReport: (p: { scenario: Scenario; time?: string; offset_min?: number; temp_delta?: number; top_n?: number }) =>
     req<PlannerReport>(`/api/planner/report?${qs(p)}`),
-  submitCommunityPoi: (body: { session_token: string; lat: number; lon: number; kind: CommunityPoiKind; name: string; note?: string }) =>
-    req<CommunityPoiSubmitResult>("/api/community/pois", { method: "POST", json: body }),
   communityPois: () => req<GeoJSON.FeatureCollection<GeoJSON.Point, { kind: CommunityPoiKind; name: string; status: string; source: "community" }>>("/api/community/pois?status=approved"),
   openDataCatalog: () => req<OpenDataCatalog>("/api/open-data"),
   intervene: (p: {

@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import type { CommunityPoiSubmitResult, CompareResult, InterventionKind, InterventionResult, Persona, Scenario } from "./api";
+import type { CompareResult, InterventionKind, InterventionResult, Persona, Scenario } from "./api";
 
 /** Every calculation runs on live conditions at the user's current time. */
 export const SCENARIO: Scenario = "live";
@@ -144,7 +144,7 @@ export interface Endpoint {
 export type MapMode = "map" | "twin";
 export type Panel = null | "insight" | "profile";
 export type RouteView = "list" | "detail";
-export type PickMode = null | "origin" | "destination" | InterventionKind | "add_poi";
+export type PickMode = null | "origin" | "destination" | InterventionKind;
 
 interface MapState {
   mode: MapMode;
@@ -178,8 +178,6 @@ interface MapState {
   equityOn: boolean;
   /** Progressive reveal: only draw the twin where the user has been. */
   revealOn: boolean;
-  addPoiDraft: { lat: number; lon: number } | null;
-  myPendingPois: CommunityPoiSubmitResult[];
   set: (p: Partial<Omit<MapState, "set">>) => void;
 }
 
@@ -207,7 +205,5 @@ export const useMap = create<MapState>()((set) => ({
   // Corridor-first: the twin draws where you are and where you are going, not the
   // whole zone. MyLocation still offers "Show whole zone" to override it.
   revealOn: true,
-  addPoiDraft: null,
-  myPendingPois: [],
   set: (p) => set(p),
 }));

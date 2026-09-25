@@ -1,6 +1,6 @@
 "use client";
 
-import { api, ApiError, type CommunityPoiKind, type InterventionKind, type InterventionResult } from "./api";
+import { api, ApiError, type InterventionKind, type InterventionResult } from "./api";
 import { SCENARIO, TIMELINE, useClock, useMap, usePrefs, type Endpoint } from "./store";
 
 let seq = 0;
@@ -93,25 +93,6 @@ export async function runIntervention(lat: number, lon: number, kind: Interventi
     useMap.getState().set({ interventionBusy: false, error: e instanceof ApiError ? e.message : "Could not simulate that intervention here." });
     return null;
   }
-}
-
-/** SDG 6 — submit a crowdsourced water/rest/shade point. Shows optimistically as "pending review". */
-export async function submitCommunityPoi(kind: CommunityPoiKind, name: string, note?: string) {
-  const m = useMap.getState();
-  const p = usePrefs.getState();
-  if (!m.addPoiDraft || !p.sessionToken) return null;
-  try {
-    const r = await api.submitCommunityPoi({ session_token: p.sessionToken, lat: m.addPoiDraft.lat, lon: m.addPoiDraft.lon, kind, name, note });
-    useMap.getState().set({ myPendingPois: [...useMap.getState().myPendingPois, r], addPoiDraft: null, pickMode: null });
-    return r;
-  } catch (e) {
-    useMap.getState().set({ error: e instanceof ApiError ? e.message : "Could not submit that point right now." });
-    return null;
-  }
-}
-
-export function cancelAddPoi() {
-  useMap.getState().set({ addPoiDraft: null, pickMode: null });
 }
 
 export function clearInterventions() {

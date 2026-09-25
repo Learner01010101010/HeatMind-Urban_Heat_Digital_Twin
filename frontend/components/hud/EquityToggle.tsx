@@ -31,7 +31,7 @@ export default function EquityToggle({ compact = false }: { compact?: boolean })
       {showInfo && on && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setShowInfo(false)} aria-hidden />
-          <div className={`glass-strong absolute right-0 z-20 w-[280px] ${compact ? "top-full mt-3" : "bottom-full mb-3"} rounded-[22px] p-4 pop-in`} role="dialog" aria-label="Heat vulnerability index">
+          <div className={`glass-strong z-20 rounded-[22px] p-4 pop-in ${compact ? "fixed top-[72px] right-[76px] w-[min(280px,calc(100vw-100px))] max-h-[calc(100dvh-140px)] overflow-y-auto" : "absolute right-0 bottom-full mb-3 w-[280px]"}`} role="dialog" aria-label="Heat vulnerability index">
             <div className="text-[10.5px] font-bold uppercase tracking-wider mb-1" style={{ color: "#dd1367" }}>
               Heat vulnerability · SDG 10
             </div>
@@ -67,7 +67,7 @@ export default function EquityToggle({ compact = false }: { compact?: boolean })
           if (next) setShowInfo(true);
         }}
         onDoubleClick={(e) => e.stopPropagation()}
-        className={`press glass flex items-center justify-center gap-2 rounded-full text-[14px] font-semibold ${compact ? "w-11 h-11" : "h-12 pl-3.5 pr-4"}`}
+        className={`press flex items-center justify-center gap-2 rounded-full text-[14px] font-semibold ${compact ? "w-11 h-11" : "glass h-12 pl-3.5 pr-4"}`}
         aria-label="Toggle heat vulnerability overlay"
         aria-pressed={on}
         style={on ? { background: "#dd1367", color: "#fff" } : undefined}
@@ -78,7 +78,7 @@ export default function EquityToggle({ compact = false }: { compact?: boolean })
       {on && (
         <button
           onClick={() => setShowInfo((v) => !v)}
-          className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-[#dd1367] text-white text-[10px] font-bold grid place-items-center"
+          className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-[#dd1367] text-white text-[10px] font-bold grid place-items-center"
           aria-label="Show methodology"
         >
           i

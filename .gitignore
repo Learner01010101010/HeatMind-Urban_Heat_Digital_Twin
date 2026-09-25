@@ -32,3 +32,11 @@ backend/data/svf.meta.json
 backend/data/zone.json
 # Per-tile Overpass cache, fetched on demand for whichever corridor is requested.
 backend/data/osm_tiles/
+
+# Raster tile caches for the satellite build steps. Fetched by range request from
+# Google Open Buildings 2.5D and the Meta/WRI canopy map; ~270 MB and reproducible
+# by rerunning scripts/fetch_buildings.py and scripts/fetch_canopy.py.
+backend/data/ob25d_tiles/
+backend/data/_win_*.npy
+# Intermediate Overture pull; buildings.json is the product of it and is committed.
+backend/data/overture_buildings.json

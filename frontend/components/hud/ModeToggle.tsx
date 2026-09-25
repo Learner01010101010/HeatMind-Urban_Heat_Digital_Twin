@@ -12,7 +12,7 @@ export default function ModeToggle({ compact = false }: { compact?: boolean }) {
     return (
       <button
         onClick={() => set({ mode: twin ? "map" : "twin" })}
-        className="press glass grid place-items-center w-11 h-11 rounded-full"
+        className="press grid place-items-center w-11 h-11 rounded-full"
         style={twin ? { background: "linear-gradient(135deg, rgba(251,138,31,.95), rgba(239,68,68,.9))" } : undefined}
         aria-label={twin ? "Switch to Map" : "Switch to Heat Twin (3D)"}
         aria-pressed={twin}
