@@ -226,15 +226,37 @@ class RoutePlanner:
                 # The stock explanation compares street routes by shade and detour
                 # length, neither of which is the story of a bus trip.
                 t = r["transit"]
+                exposed_min = sum(l["minutes"] for l in t["legs"]
+                                  if l["kind"] == "walk" or (l["kind"] == "wait" and not l["sheltered"]))
                 r["explanation"] = {
                     "summary": (
                         f"Walk {t['walk_m']} m to {t['board']['name']}, wait about "
                         f"{t['wait_min']:.0f} min, then ride to {t['alight']['name']}."
-                        + (" The stop has a shelter." if t["board"]["shelter"]
-                           else " The stop has no shelter, so the wait is in the open.")
                     ),
-                    "detail": t["disclaimer"],
+                    "bullets": [
+                        {"icon": "sun",
+                         "text": (f"About {exposed_min:.0f} of the {t['total_min']:.0f} minutes are spent "
+                                  f"outdoors — the walk at each end and the wait.")},
+                        {"icon": "shade",
+                         "text": (f"{t['board']['name']} has a shelter, so the wait is out of the sun."
+                                  if t["board"]["shelter"] else
+                                  f"{t['board']['name']} has no shelter recorded, so the "
+                                  f"{t['wait_min']:.0f}-minute wait is in the open.")},
+                        {"icon": "clock", "text": t["disclaimer"]},
+                    ],
+                    "top_factors": ["duration", "shade"],
+                    "source": "rule_based",
                 }
+                # One keyframe, not none: the sheet interpolates a forecast series by
+                # position and a single point is a flat line, which is the honest
+                # shape for a trip whose wait does not move with the sun.
+                r["forecast"] = [{
+                    "offset_min": 0, "time": f0.when.isoformat(),
+                    "score": r["heat_risk_score"], "band": r["band"],
+                    "heat_dose": r["metrics"]["heat_dose"],
+                    "pct_shaded": r["metrics"]["pct_shaded"],
+                    "peak_feels_c": r["metrics"]["peak_feels_c"],
+                }]
                 continue
             ref = fastest if r is not fastest else (recommended if recommended is not fastest else None)
             if ref is None:

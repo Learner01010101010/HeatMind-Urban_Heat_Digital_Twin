@@ -10,6 +10,7 @@ import { InsightChip, InsightPanel } from "@/components/hud/InsightChip";
 import InterventionPanel from "@/components/hud/InterventionPanel";
 import MyLocation from "@/components/hud/MyLocation";
 import ModeToggle from "@/components/hud/ModeToggle";
+import ModeSelector from "@/components/hud/ModeSelector";
 import { ProfileButton, ProfilePanel } from "@/components/hud/Profile";
 import RouteSheet from "@/components/hud/RouteSheet";
 import SearchPill from "@/components/hud/SearchPill";
@@ -79,8 +80,13 @@ export default function Home() {
       {/* ── top: search · (global nav is centred by the layout) · mode · profile ── */}
       <div className="absolute top-0 inset-x-0 z-30 p-3 md:p-5 pt-[max(12px,env(safe-area-inset-top))] pointer-events-none">
         <div className="flex items-start gap-2.5">
-          <div className="pointer-events-auto flex-1 md:flex-none min-w-0">
+          <div className="pointer-events-auto flex-1 md:flex-none min-w-0 flex flex-col gap-2.5 items-start">
             <SearchPill />
+            {/* Travel mode belongs with the trip inputs, not the view controls: it
+                changes the answer, where Map/Heat Twin only changes the picture. */}
+            <div className="hidden md:block">
+              <ModeSelector />
+            </div>
           </div>
           <div className="pointer-events-auto ml-auto flex items-center gap-2.5">
             {/* The global nav is fixed to the centre of this same bar, so the view
@@ -155,6 +161,9 @@ export default function Home() {
         </div>
       ) : (
         <div className="absolute inset-x-0 bottom-[calc(56px+env(safe-area-inset-bottom))] z-30 p-2 flex flex-col gap-2 pointer-events-none">
+          <div className="pointer-events-auto self-center max-w-full overflow-x-auto no-scrollbar">
+            <ModeSelector compact />
+          </div>
           {sheet && <div className="pointer-events-auto">{sheet}</div>}
           <div className="pointer-events-auto">
             <Timeline compact />

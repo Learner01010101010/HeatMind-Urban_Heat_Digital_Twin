@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, ChevronLeft, ChevronRight, Clock3, Droplets, Sun, TreePine, TriangleAlert } from "lucide-react";
+import { Bus, ChevronDown, ChevronLeft, ChevronRight, Clock3, Droplets, Footprints, Hourglass, Sun, TreePine, TriangleAlert } from "lucide-react";
 import type { CompareResult, Route } from "@/lib/api";
 import { fmtClock, fmtDist, riskColor } from "@/lib/heatColorScale";
 import { personaOf } from "@/lib/personas";
@@ -8,14 +8,23 @@ import { atTime, useMap, usePrefs } from "@/lib/store";
 import AnimatedNumber from "@/components/ui/AnimatedNumber";
 import RiskRing from "@/components/ui/RiskRing";
 import RoutePanel from "./RoutePanel";
+import TransitLegs from "./TransitLegs";
 
 const TAG: Record<string, string> = { recommended: "HeatMind pick", fastest: "Fastest", coolest: "Least heat dose", current: "Your route" };
 
 function metrics(r: Route, fastest: Route, timeMin: number) {
+  // A transit route carries no per-keyframe forecast: its legs run at three speeds
+  // and the wait does not move along the street, so the scrubber's interpolation has
+  // nothing to interpolate. Its single scored snapshot is used instead.
+  if (r.transit) {
+    return { shade: r.metrics.pct_shaded, score: r.heat_risk_score, red: 0, water: 0 };
+  }
   const shade = atTime(r.forecast.map((f) => f.pct_shaded), timeMin);
   const score = atTime(r.forecast.map((f) => f.score), timeMin);
   const sun = r.duration_min * (1 - shade / 100);
-  const fShade = atTime(fastest.forecast.map((f) => f.pct_shaded), timeMin);
+  const fShade = fastest.transit
+    ? fastest.metrics.pct_shaded
+    : atTime(fastest.forecast.map((f) => f.pct_shaded), timeMin);
   const sunF = fastest.duration_min * (1 - fShade / 100);
   const red = sunF > 0 ? ((sunF - sun) / sunF) * 100 : 0;
   const water = r.pois_along_route.filter((p) => p.type === "water" || p.type === "cooling_center").length;
@@ -42,10 +51,25 @@ function Row({ r, fastest, timeMin, selected }: { r: Route; fastest: Route; time
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
           <span className="grid place-items-center w-[18px] h-[18px] rounded-full text-[10px] font-bold text-ink-950 shrink-0" style={{ background: r.color }}>
-            {r.label.replace("Route ", "")}
+            {r.transit ? <Bus size={11} aria-label="Bus" /> : r.label.replace("Route ", "")}
           </span>
           <span className={`text-[12.5px] font-semibold truncate ${pick ? "text-ink-100" : "text-ink-300"}`}>{TAG[r.tags[0]] ?? r.title}</span>
         </div>
+        {r.transit ? (
+          /* A bus trip is judged on how much of it is on foot and how long the wait
+             is, not on the canopy over a street the rider is not standing on. */
+          <div className="flex items-center gap-2.5 mt-1 text-[11.5px] text-ink-400 tabular">
+            <span className="flex items-center gap-0.5">
+              <Footprints size={11} className="text-cool-300" />
+              {fmtDist(r.transit.walk_m)}
+            </span>
+            <span className="flex items-center gap-0.5">
+              <Hourglass size={11} className={r.transit.board.shelter ? "text-cool-300" : "text-heat-4"} />
+              {Math.round(r.transit.wait_min)} min
+            </span>
+            <span className="truncate">{r.transit.board.shelter ? "sheltered stop" : "open stop"}</span>
+          </div>
+        ) : (
         <div className="flex items-center gap-2.5 mt-1 text-[11.5px] text-ink-400 tabular">
           <span className="flex items-center gap-0.5">
             <TreePine size={11} className="text-cool-300" />
@@ -60,6 +84,7 @@ function Row({ r, fastest, timeMin, selected }: { r: Route; fastest: Route; time
             {isFastest ? "base" : `${red > 0 ? "−" : "+"}${Math.abs(Math.round(red))}%`}
           </span>
         </div>
+        )}
       </div>
       <div className="text-right leading-none shrink-0">
         <div className="text-[22px] font-semibold tracking-[-0.04em] tabular text-ink-100">
@@ -150,7 +175,8 @@ export default function RouteSheet({ compare, variant }: { compare: CompareResul
         {open && (
           <div className="flex-1 min-h-0 overflow-y-auto scroll-thin px-2.5 pb-3 fade-in">
             {detail ? (
-              <div className="px-2 pt-1">
+              <div className="px-2 pt-1 space-y-2">
+                {route.transit ? <TransitLegs plan={route.transit} /> : null}
                 <RoutePanel route={route} />
               </div>
             ) : (
@@ -192,7 +218,9 @@ export default function RouteSheet({ compare, variant }: { compare: CompareResul
                   <span className="block text-[13px] font-semibold text-ink-100 tabular">
                     {r.label.replace("Route ", "")} · {Math.round(r.duration_min)} min
                   </span>
-                  <span className="block text-[10.5px] text-ink-400 tabular">{Math.round(shade)}% shade</span>
+                  <span className="block text-[10.5px] text-ink-400 tabular">
+                    {r.transit ? `${fmtDist(r.transit.walk_m)} walk` : `${Math.round(shade)}% shade`}
+                  </span>
                 </span>
               </button>
             );

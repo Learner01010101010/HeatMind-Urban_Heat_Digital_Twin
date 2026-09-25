@@ -4,7 +4,7 @@ import * as maplibregl from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
 import { api, type BuildingProps, type EquityIndex, type InterventionKind, type InterventionResult, type PackedBuildings } from "@/lib/api";
 import { runIntervention, setEndpoint } from "@/lib/actions";
-import { useBaseTime, useFrames, useMeta, useNearestFrame, usePois, useZone } from "@/lib/hooks";
+import { useBaseTime, useBusStops, useFrames, useMeta, useNearestFrame, usePois, useZone } from "@/lib/hooks";
 import { useGeo } from "@/lib/geolocation";
 import { fmtDelta, fmtTemp, heatColor, heatLabel, riskColor } from "@/lib/heatColorScale";
 import { INTERVENTION_STYLE } from "@/lib/interventionStyle";
@@ -147,6 +147,8 @@ export default function TwinMap() {
   const timeMin = useMap((s) => s.timeMin);
   const compare = useMap((s) => s.compare);
   const selected = useMap((s) => s.selectedRouteId);
+  const travelMode = usePrefs((s) => s.mode);
+  const busStops = useBusStops();
   const origin = useMap((s) => s.origin);
   const destination = useMap((s) => s.destination);
   const pickMode = useMap((s) => s.pickMode);
@@ -236,6 +238,31 @@ export default function TwinMap() {
           "circle-stroke-color": "#060606",
           "circle-stroke-width": ["case", ["get", "on"], 2, 0.5],
         },
+      });
+      // Bus stops. Two layers so the boarding and alighting stops of the chosen
+      // itinerary read as chosen, rather than as two of ninety-eight identical dots.
+      map.addSource("bus-stops", { type: "geojson", data: EMPTY });
+      map.addLayer({
+        id: "bus-stops", type: "circle", source: "bus-stops", minzoom: 12,
+        paint: {
+          "circle-color": ["case", ["get", "on"], "#5bb8d4", "#2c6a7d"],
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, ["case", ["get", "on"], 5, 2], 17, ["case", ["get", "on"], 11, 5]],
+          "circle-opacity": ["case", ["get", "on"], 1, 0.7],
+          "circle-stroke-color": "#060606",
+          "circle-stroke-width": ["case", ["get", "on"], 2.5, 0.6],
+        },
+      });
+      map.addLayer({
+        id: "bus-stop-labels", type: "symbol", source: "bus-stops",
+        filter: ["get", "on"],
+        layout: {
+          "text-field": ["get", "name"],
+          "text-size": 12,
+          "text-offset": [0, 1.5],
+          "text-anchor": "top",
+          "text-max-width": 9,
+        },
+        paint: { "text-color": "#cfe9f2", "text-halo-color": "#060606", "text-halo-width": 1.6 },
       });
       map.addSource("routes", { type: "geojson", data: EMPTY });
       map.addSource("route-seg", { type: "geojson", data: EMPTY });
@@ -605,6 +632,31 @@ export default function TwinMap() {
       );
     }
   }, [ready, compare, selected, mode, layerEpoch]);
+
+  // ───────── bus stops ─────────
+  // Only while the bus is in play. Ninety-eight dots over a walking route would be
+  // noise; the same dots while planning a bus trip are the thing being chosen
+  // between, and the boarding and alighting stops are named.
+  useEffect(() => {
+    const map = ready;
+    if (!ready || !map) return;
+    const src = map.getSource("bus-stops") as maplibregl.GeoJSONSource | undefined;
+    if (!src) return;
+    const busRoute = compare?.routes.find((r) => r.tags.includes("transit"));
+    const show = travelMode === "bus" && !!busStops.data;
+    if (!show) {
+      src.setData(EMPTY);
+      return;
+    }
+    const chosen = new Set([busRoute?.transit?.board.id, busRoute?.transit?.alight.id].filter(Boolean));
+    src.setData({
+      type: "FeatureCollection",
+      features: busStops.data!.features.map((f) => ({
+        ...f,
+        properties: { ...f.properties, on: chosen.has(f.properties.id) },
+      })),
+    });
+  }, [ready, travelMode, busStops.data, compare]);
 
   // ───────── POIs ─────────
   useEffect(() => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { api, ApiError, type InterventionKind, type InterventionResult } from "./api";
+import { api, ApiError, type InterventionKind, type InterventionResult, type TravelMode } from "./api";
 import { SCENARIO, TIMELINE, useClock, useMap, usePrefs, type Endpoint } from "./store";
 
 let seq = 0;
@@ -18,7 +18,7 @@ export async function runCompare(opts: { silent?: boolean } = {}) {
   try {
     const base = useClock.getState().base;
     // A fresh comparison always starts from real (un-simulated) conditions at the live time.
-    const r = await api.compare({ origin: m.origin, destination: m.destination, persona: p.persona, scenario: SCENARIO, depart_at: base });
+    const r = await api.compare({ origin: m.origin, destination: m.destination, persona: p.persona, mode: p.mode, scenario: SCENARIO, depart_at: base });
     if (my !== seq) return;
     const cur = useMap.getState();
     const prevLabel = cur.compare?.routes.find((x) => x.id === cur.selectedRouteId)?.label;
@@ -56,6 +56,21 @@ export async function runSimulate(timeOffsetMin: number, tempDelta: number) {
     useMap.getState().set({ loading: false, error: e instanceof ApiError ? e.message : "Simulation failed" });
     return null;
   }
+}
+
+/**
+ * Switch travel mode and re-plan.
+ *
+ * The whole comparison is recomputed rather than rescaled: a different mode is a
+ * different set of usable streets, not the same route at a different speed. A car
+ * cannot take the campus footpath the walking route went down, so its geometry,
+ * its time and its heat exposure all change together.
+ */
+export function setMode(mode: TravelMode) {
+  if (usePrefs.getState().mode === mode) return;
+  usePrefs.getState().set({ mode });
+  const m = useMap.getState();
+  if (m.origin && m.destination) void runCompare();
 }
 
 export function setEndpoint(which: "origin" | "destination", ep: Endpoint | null) {

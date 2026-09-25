@@ -21,6 +21,7 @@ export const getMeta = once(api.meta);
 const metaOnce = getMeta;
 const zoneOnce = once(api.zone);
 const poisOnce = once(api.pois);
+const busStopsOnce = once(api.busStops);
 
 function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []) {
   const [state, setState] = useState<{ data: T | null; error: string | null; loading: boolean }>({
@@ -53,6 +54,8 @@ function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []) {
 export const useMeta = () => useAsync<Meta>(metaOnce);
 export const useZone = () => useAsync<ZoneData>(zoneOnce);
 export const usePois = () => useAsync(poisOnce);
+/** Real OSM bus stops. Fetched once and shared — the list does not change. */
+export const useBusStops = () => useAsync(busStopsOnce);
 
 /** True once zustand's persisted prefs have loaded from localStorage. */
 export function useHydrated() {

@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import type { BreakStop, CompareResult, InterventionKind, InterventionResult, Persona, Scenario } from "./api";
+import type { BreakStop, CompareResult, InterventionKind, InterventionResult, Persona, Scenario, TravelMode } from "./api";
 
 /** Every calculation runs on live conditions at the user's current time. */
 export const SCENARIO: Scenario = "live";
@@ -43,6 +43,8 @@ interface Prefs {
   sessionToken: string;
   userId: number | null;
   persona: Persona;
+  /** How they travel. Persisted like persona: most people commute the same way daily. */
+  mode: TravelMode;
   units: Units;
   seniorMode: boolean;
   reduceMotion: boolean;
@@ -68,6 +70,7 @@ export const usePrefs = create<Prefs>()(
       sessionToken: "",
       userId: null,
       persona: "student",
+      mode: "walk",
       units: "C",
       seniorMode: false,
       reduceMotion: false,
@@ -97,6 +100,7 @@ export const usePrefs = create<Prefs>()(
         sessionToken: state.sessionToken,
         userId: state.userId,
         persona: state.persona,
+        mode: state.mode,
         units: state.units,
         seniorMode: state.seniorMode,
         reduceMotion: state.reduceMotion,
