@@ -137,6 +137,7 @@ export default function TwinMap() {
   const communityMarkersRef = useRef<maplibregl.Marker[]>([]);
   const breakMarkersRef = useRef<maplibregl.Marker[]>([]);
   const meMarker = useRef<maplibregl.Marker | null>(null);
+  const arrowMarker = useRef<maplibregl.Marker | null>(null);
   const fittedFor = useRef<string | null>(null);
 
   const meta = useMeta();
@@ -688,6 +689,68 @@ export default function TwinMap() {
       );
     }
   }, [ready, compare, selected, mode, layerEpoch]);
+
+  // ───────── the traveller's arrow on the selected route ─────────
+  //
+  // A route drawn as a line says where to go but not which end you are at, and once
+  // guidance starts the chase camera moves the whole world under a view that has
+  // nothing in it standing for the person. The arrow is that: it sits at the start
+  // of the selected route the moment one is picked, points along the first leg, and
+  // slides and turns with the route as the trip progresses.
+  //
+  // Driven from the same `progressM` the HUD instruction reads, per animation frame
+  // rather than through React state. A setState per frame would re-render the whole
+  // map component sixty times a second to move one element; and easing the marker
+  // in CSS instead would leave it trailing the camera that is following it.
+  useEffect(() => {
+    const map = ready;
+    if (arrowMarker.current) {
+      arrowMarker.current.remove();
+      arrowMarker.current = null;
+    }
+    if (!ready || !map) return;
+    const route = compare?.routes.find((r) => r.id === selected);
+    const geometry = route?.geometry;
+    if (!route || !geometry || geometry.length < 2) return;
+
+    const el = document.createElement("div");
+    el.className = "hm-travel-arrow";
+    el.innerHTML =
+      `<svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">` +
+      `<circle cx="12" cy="12" r="11" fill="#060606" fill-opacity=".72"/>` +
+      `<circle cx="12" cy="12" r="11" stroke="${route.color}" stroke-width="1.6"/>` +
+      `<path d="M12 5.4 L17.2 17.4 L12 14.3 L6.8 17.4 Z" fill="${route.color}"/>` +
+      `</svg>`;
+    const inner = el.firstElementChild as SVGElement;
+    const marker = new maplibregl.Marker({ element: el, anchor: "center", pitchAlignment: "map", rotationAlignment: "map" })
+      // Seated at the route's first vertex before it is added. addTo() reads the
+      // marker's own LngLat to place it, and the per-frame loop below does not run
+      // until the next frame, so adding it unpositioned throws on `undefined.lng`.
+      .setLngLat([geometry[0][1], geometry[0][0]]);
+    arrowMarker.current = marker;
+
+    const cum = cumulative(geometry);
+    let raf = 0;
+    let shownBearing: number | null = null;
+    const place = () => {
+      const nav = useNav.getState();
+      const along = alongRoute(geometry, cum, nav.active && nav.routeId === route.id ? nav.progressM : 0);
+      marker.setLngLat([along.position[1], along.position[0]]);
+      // Damp the heading the same way the camera does, so the two do not disagree
+      // by a few degrees every frame on a curving street.
+      if (shownBearing === null) shownBearing = along.bearing;
+      else shownBearing += (((along.bearing - shownBearing + 540) % 360) - 180) * (reduceMotion ? 1 : 0.18);
+      inner.style.transform = `rotate(${shownBearing}deg)`;
+      raf = requestAnimationFrame(place);
+    };
+    marker.addTo(map);
+    raf = requestAnimationFrame(place);
+    return () => {
+      cancelAnimationFrame(raf);
+      marker.remove();
+      if (arrowMarker.current === marker) arrowMarker.current = null;
+    };
+  }, [ready, compare, selected, reduceMotion]);
 
   // ───────── bus stops ─────────
   // Only while the bus is in play. Ninety-eight dots over a walking route would be
