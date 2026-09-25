@@ -275,6 +275,67 @@ class Zone:
                 "geometry": {"type": "Polygon", "coordinates": [[[lo, la] for la, lo in b["ring"]]]}})
         return {"type": "FeatureCollection", "features": feats}
 
+    def buildings_packed(self) -> dict:
+        """The same footprints as buildings_geojson(), as parallel arrays.
+
+        GeoJSON costs about 90 bytes of `{"type":"Feature","properties":{...}}`
+        scaffolding per building, and the measured footprint set is 56,276 of them:
+        the wrapper and the five properties nothing renders were 13 MB of a 21 MB
+        payload. Packed, the same information is 7 MB, and the client rebuilds
+        whatever shape it needs from arrays that parse an order of magnitude faster
+        than 56,276 nested objects.
+
+        Coordinates are 6 decimal places -- 11 cm, which is already well past the
+        accuracy of a satellite-detected footprint.
+        """
+        from .building_types import classify_cached
+        types = classify_cached(self)
+        typologies: list[str] = []
+        sources: list[str] = []
+        t_index: dict[str, int] = {}
+        s_index: dict[str, int] = {}
+        h: list[float] = []
+        t: list[int] = []
+        hs: list[int] = []
+        seeds: list[int] = []
+        off: list[int] = [0]
+        xy: list[float] = []
+
+        for b in self.data["buildings"]:
+            typology, _ = types.get(b["id"], ("residential", "inferred"))
+            if typology not in t_index:
+                t_index[typology] = len(typologies)
+                typologies.append(typology)
+            src = b.get("height_source", "satellite")
+            if src not in s_index:
+                s_index[src] = len(sources)
+                sources.append(src)
+            h.append(b["height_m"])
+            t.append(t_index[typology])
+            hs.append(s_index[src])
+            seeds.append(_seed(b["osm_id"]))
+            for la, lo in b["ring"]:
+                xy.append(round(lo, 6))
+                xy.append(round(la, 6))
+            off.append(len(xy) // 2)
+
+        return {"n": len(h), "typologies": typologies, "height_sources": sources,
+                "h": h, "t": t, "hs": hs, "seed": seeds, "off": off, "xy": xy}
+
+    def trees_packed(self) -> list[float]:
+        """[lon, lat, radius_m, density] per tree, flat.
+
+        85,771 trees as GeoJSON points is 11 MB of Feature wrappers around four
+        numbers each. Flat, it is 2.6 MB.
+        """
+        out: list[float] = []
+        for t in self.trees:
+            out.append(round(t["lon"], 6))
+            out.append(round(t["lat"], 6))
+            out.append(round(t["radius_m"], 2))
+            out.append(round(t["density"], 2))
+        return out
+
     def surfaces_geojson(self) -> dict:
         return {"type": "FeatureCollection", "features": [
             {"type": "Feature", "id": s["id"], "properties": {"kind": s["kind"], "name": s["name"]},

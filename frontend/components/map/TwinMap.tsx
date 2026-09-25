@@ -2,7 +2,7 @@
 
 import * as maplibregl from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
-import { api, type EquityIndex, type InterventionKind, type InterventionResult } from "@/lib/api";
+import { api, type BuildingProps, type EquityIndex, type InterventionKind, type InterventionResult, type PackedBuildings } from "@/lib/api";
 import { runIntervention, setEndpoint } from "@/lib/actions";
 import { useBaseTime, useFrames, useMeta, useNearestFrame, usePois, useZone } from "@/lib/hooks";
 import { useGeo } from "@/lib/geolocation";
@@ -81,6 +81,43 @@ function interventionPopupHtml(r: InterventionResult, units: "C" | "F") {
       </div>
       <div style="font-size:11px;color:#908c84;margin-top:8px;line-height:1.4">${esc(r.note)}</div>
     </div>`;
+}
+
+
+/**
+ * Rebuild GeoJSON features from the packed building arrays.
+ *
+ * Memoised on the payload object: the 2D fill source and the 3D extrusion layer
+ * both need these, and over 56,276 footprints doing the work twice is a second of
+ * main-thread time for nothing.
+ */
+const buildingCache = new WeakMap<PackedBuildings, GeoJSON.FeatureCollection<GeoJSON.Polygon, BuildingProps>>();
+
+function unpackBuildings(p: PackedBuildings): GeoJSON.FeatureCollection<GeoJSON.Polygon, BuildingProps> {
+  const hit = buildingCache.get(p);
+  if (hit) return hit;
+  const features: GeoJSON.Feature<GeoJSON.Polygon, BuildingProps>[] = new Array(p.n);
+  for (let i = 0; i < p.n; i++) {
+    const a = p.off[i], b = p.off[i + 1];
+    const ring: GeoJSON.Position[] = new Array(b - a);
+    for (let k = a; k < b; k++) ring[k - a] = [p.xy[k * 2], p.xy[k * 2 + 1]];
+    features[i] = {
+      type: "Feature",
+      id: i,
+      properties: {
+        height_m: p.h[i],
+        typology: p.typologies[p.t[i]] as BuildingProps["typology"],
+        height_source: p.height_sources[p.hs[i]] as BuildingProps["height_source"],
+        seed: p.seed[i],
+      },
+      geometry: { type: "Polygon", coordinates: [ring] },
+    };
+  }
+  const fc: GeoJSON.FeatureCollection<GeoJSON.Polygon, BuildingProps> = {
+    type: "FeatureCollection", features,
+  };
+  buildingCache.set(p, fc);
+  return fc;
 }
 
 export default function TwinMap() {
@@ -223,7 +260,7 @@ export default function TwinMap() {
   useEffect(() => {
     const map = ready;
     if (!ready || !map || !zone.data) return;
-    (map.getSource("buildings") as maplibregl.GeoJSONSource).setData(zone.data.buildings);
+    (map.getSource("buildings") as maplibregl.GeoJSONSource).setData(unpackBuildings(zone.data.buildings));
     (map.getSource("water") as maplibregl.GeoJSONSource).setData({
       type: "FeatureCollection",
       features: zone.data.surfaces.features.filter((f) => f.properties?.kind === "water"),
@@ -244,18 +281,18 @@ export default function TwinMap() {
     loadFields()
       .then((fields) => {
         if (dead || !mapRef.current) return;
-        const trees: TreeRecord[] = zone.data!.trees.features.map((f) => {
-          const c = (f.geometry as GeoJSON.Point).coordinates;
-          const pr = f.properties as { r: number; d: number } | null;
-          return { lat: c[1], lon: c[0], radiusM: pr?.r ?? 4, density: pr?.d ?? 0.7 };
-        });
+        const flat = zone.data!.trees;
+        const trees: TreeRecord[] = new Array(flat.length / 4);
+        for (let i = 0, j = 0; i < flat.length; i += 4, j++) {
+          trees[j] = { lon: flat[i], lat: flat[i + 1], radiusM: flat[i + 2], density: flat[i + 3] };
+        }
         const signals: SignalRecord[] = (zone.data!.signals?.features ?? []).map((f) => {
           const c = (f.geometry as GeoJSON.Point).coordinates;
           return { lat: c[1], lon: c[0], kind: f.properties.kind, crossing: f.properties.crossing };
         });
         const layer = new HeatTwinLayer(
           fields,
-          zone.data!.buildings.features,
+          unpackBuildings(zone.data!.buildings).features,
           trees,
           zone.data!.roads.features,
           zone.data!.junctions ?? [],

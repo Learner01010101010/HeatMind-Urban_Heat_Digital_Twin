@@ -86,9 +86,9 @@ def meta():
 @app.get("/api/zone", tags=["meta"])
 def zone():
     z = get_zone()
-    return {"meta": z.data["meta"], "buildings": z.buildings_geojson(), "surfaces": z.surfaces_geojson(),
+    return {"meta": z.data["meta"], "buildings": z.buildings_packed(), "surfaces": z.surfaces_geojson(),
             "roads": z.roads_geojson(), "junctions": z.junctions(), "signals": z.signals_geojson(),
-            "trees": z.trees_geojson(), "places": z.places}
+            "trees": z.trees_packed(), "places": z.places}
 
 
 @app.get("/api/anthropogenic", tags=["meta"])
