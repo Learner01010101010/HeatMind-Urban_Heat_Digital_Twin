@@ -566,10 +566,17 @@ export default function TwinMap() {
     if (!ready || !map) return;
     const route = compare?.routes.find((r) => r.id === selected) ?? compare?.routes[0];
     const stops = route?.breaks?.stops ?? [];
+    // The twin draws these as standing beacons instead; see breakBeacons.ts. The DOM
+    // marker stays in place either way because it is the click target, but it is
+    // made transparent in the twin so a flat sticker is not laid over the beacon.
+    layerRef.current?.setBreakStops(
+      stops.filter((st) => st.lat !== null && st.lon !== null)
+        .map((st) => ({ lat: st.lat!, lon: st.lon!, type: st.type, hasSource: st.has_source })),
+    );
     for (const st of stops) {
       if (st.lat === null || st.lon === null) continue;
       const d = document.createElement("div");
-      d.className = `hm-break-pin${st.has_source ? "" : " dry"}`;
+      d.className = `hm-break-pin${st.has_source ? "" : " dry"}${mode === "twin" ? " in-twin" : ""}`;
       d.dataset.kind = st.type;
       d.innerHTML = st.type === "rest" ? "&#9612;" : "";
       d.title = `${st.type === "rest" ? "Rest" : "Drink"} at ${(st.at_m / 1000).toFixed(1)} km`;
@@ -589,7 +596,7 @@ export default function TwinMap() {
         new maplibregl.Marker({ element: d, anchor: "center" }).setLngLat([st.lon, st.lat]).addTo(map),
       );
     }
-  }, [ready, compare, selected]);
+  }, [ready, compare, selected, mode, layerEpoch]);
 
   // ───────── POIs ─────────
   useEffect(() => {
@@ -702,8 +709,21 @@ export default function TwinMap() {
   // ───────── camera requests / cursor ─────────
   useEffect(() => {
     const map = ready;
-    if (ready && map && flyTo) map.flyTo({ center: [flyTo.lon, flyTo.lat], zoom: flyTo.zoom ?? 17.2, duration: reduceMotion ? 0 : 1400, essential: true });
-  }, [ready, flyTo, reduceMotion]);
+    if (!ready || !map || !flyTo) return;
+    // Carry the tilt when the request also switches into the twin. Asking to see a
+    // stop in 3D sets mode and flyTo in the same update, so this animation and the
+    // mode change's easeTo start together and the later one wins -- which landed the
+    // camera flat on a scene whose whole point is that it is not. Only applied when
+    // the pitch is inconsistent with the mode, so a tilt the user chose is kept.
+    const flat = map.getPitch() < 10;
+    map.flyTo({
+      center: [flyTo.lon, flyTo.lat],
+      zoom: flyTo.zoom ?? 17.2,
+      ...(mode === "twin" && flat ? { pitch: 62, bearing: -28 } : {}),
+      duration: reduceMotion ? 0 : 1400,
+      essential: true,
+    });
+  }, [ready, flyTo, reduceMotion, mode]);
 
   useEffect(() => {
     const map = ready;

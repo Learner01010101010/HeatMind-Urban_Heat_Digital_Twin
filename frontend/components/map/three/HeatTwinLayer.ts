@@ -11,6 +11,7 @@ import { makeLutTexture } from "./fields";
 import { RevealField } from "./reveal";
 import { RoutePins } from "./routePins";
 import { VulnerabilitySurface } from "./vulnerability";
+import { BreakBeacons, type BreakBeaconRecord } from "./breakBeacons";
 import { Landcover } from "./landcover";
 import { Roads, type RoadFeatureProps } from "./roads";
 import { TrafficSignals, type SignalRecord } from "./signals";
@@ -74,6 +75,9 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
   private trees!: Trees;
   private signals!: TrafficSignals;
   private landcover!: Landcover;
+  private beacons!: BreakBeacons;
+  /** Kept so the beacons survive a layer rebuild and a mode change. */
+  private beaconRecords: BreakBeaconRecord[] = [];
 
   private sun: SunState = { elevationDeg: 45, azimuthDeg: 180, intensity: 1 };
   private sunDir = new THREE.Vector3(0, 0, 1);
@@ -130,6 +134,8 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
 
     this.pins = new RoutePins(this.fields, reveal, makeLutTexture(), this.lift);
     this.signals = new TrafficSignals(this.signalRecords, this.fields, exposure, reveal, this.lift);
+    this.beacons = new BreakBeacons(this.fields, this.lift);
+    this.beacons.set(this.beaconRecords, this.fields);
 
     this.scene.add(this.vulnerability.mesh);
     this.scene.add(this.pins.mesh);
@@ -139,6 +145,7 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     this.scene.add(this.buildings.mesh);
     this.scene.add(this.trees.canopy);
     this.scene.add(this.signals.mesh);
+    this.scene.add(this.beacons.mesh);
     this.scene.add(this.trees.trunks);
 
     this.applySun();
@@ -164,6 +171,7 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     this.buildings?.dispose();
     this.trees?.dispose();
     this.signals?.dispose();
+    this.beacons?.dispose();
     this.renderer?.dispose();
   }
 
@@ -185,6 +193,7 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     this.pins?.setGrow(this.grow);
     // Masts rise with the buildings; the painted crossings stay flat either way.
     this.signals?.setGrow(this.grow);
+    this.beacons?.setGrow(this.grow);
 
     // Keep the route's temperature profile readable as the camera pulls back.
     // Recomputed per frame rather than on a zoom event: MapLibre eases zoom over
@@ -196,6 +205,7 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
       this.pins.setPixelScale(mpp);
       this.roads?.setPixelScale(mpp);
       this.signals?.setPixelScale(mpp);
+      this.beacons?.setPixelScale(mpp);
       // Canopy budget by how much ground a pixel covers. Close in, everything; at a
       // zoom that fits Narhe to Swargate a 2 m crown is sub-pixel, so the smallest
       // crowns come off first and the tree lines stay.
@@ -396,6 +406,13 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
       if (m && m.uniforms && "uRevealOn" in m.uniforms) out.push(m);
     });
     return out;
+  }
+
+  /** Hydration and rest stops for the selected route, as beacons in the twin. */
+  setBreakStops(records: BreakBeaconRecord[]) {
+    this.beaconRecords = records;
+    this.beacons?.set(records, this.fields);
+    this.map?.triggerRepaint();
   }
 
   /** Canopy planted by the intervention simulator this session. */
