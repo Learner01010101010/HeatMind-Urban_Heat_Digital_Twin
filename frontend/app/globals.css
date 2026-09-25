@@ -258,6 +258,10 @@ html.senior {
   background: linear-gradient(140deg, #9ee7a8, #46b36a);
   box-shadow: 0 2px 10px rgba(70, 179, 106, 0.5);
 }
+/* In the twin the beacon is the visible marker; this stays only to be tappable. */
+.hm-break-pin.in-twin {
+  opacity: 0;
+}
 .hm-break-pin.dry {
   background: transparent;
   border: 2px dashed #f2a33c;
