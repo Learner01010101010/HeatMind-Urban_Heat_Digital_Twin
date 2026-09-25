@@ -80,6 +80,17 @@ like a crash rather than a refusal.
 session token all live in `localStorage`. Without `setDomStorageEnabled` the app
 re-onboards on every launch and loses the passport history.
 
+**No pull-to-refresh.** This shell used to wrap the WebView in a `SwipeRefreshLayout`,
+guarded so it only armed when the page was scrolled to the top. On a full-bleed map
+that guard never fires: the document itself never scrolls, so `scrollY` is always 0
+and every downward drag on the map was read as a refresh — reloading the app, losing
+the session and re-fetching the zone payload, in the middle of an ordinary pan. The
+layout is gone rather than re-tuned, because there is no threshold that separates
+"pan the map down" from "pull to refresh" when the gesture and the surface are the
+same. Reloading lives on the Retry button, which only appears when the page failed.
+The web app sets `overscroll-behavior: none` for the same reason, so mobile Chrome
+and an installed PWA do not reintroduce the gesture outside this shell.
+
 Plus: outbound links (OSM attribution, the GitHub link in About) open in the system
 browser instead of stranding the user in a chromeless WebView with no address bar;
 state is saved across rotation so the ~2.6 MB zone payload is not re-fetched; and

@@ -4,16 +4,16 @@
     android:layout_height="match_parent"
     android:background="@color/ink_950">
 
-    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
-        android:id="@+id/swipeRefresh"
+    <!-- No pull-to-refresh. The document under this WebView never scrolls: the map
+         fills the screen and handles its own drags, so a downward swipe is a pan,
+         not a request to reload. Any swipe-refresh here fires on an ordinary map
+         gesture and throws away the session and the ~2.6 MB zone payload with it.
+         Reloading lives on the Retry button below, which only appears when the page
+         actually failed to load. -->
+    <WebView
+        android:id="@+id/webView"
         android:layout_width="match_parent"
-        android:layout_height="match_parent">
-
-        <WebView
-            android:id="@+id/webView"
-            android:layout_width="match_parent"
-            android:layout_height="match_parent" />
-    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+        android:layout_height="match_parent" />
 
     <!-- Shown until the document finishes; the page has its own "Booting the
          digital twin" state once it is running, so this only covers the gap
