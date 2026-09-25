@@ -2,6 +2,7 @@
 
 import * as THREE from "three";
 import type { TwinFields } from "./fields";
+import { LIFT_GLSL, type LiftUniforms } from "./lift";
 import { REVEAL_GLSL } from "./reveal";
 
 /**
@@ -58,13 +59,18 @@ varying float vClass;
 varying float vWidth;
 varying vec2 vGround;
 
+uniform vec2 uExtent;
+${LIFT_GLSL}
+
 void main() {
   vAlong = aAlong;
   vAcross = aAcross;
   vClass = aClass;
   vWidth = aWidth;
   vGround = position.xy;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  vec3 p = position;
+  p.z += liftAt(clamp(vGround / uExtent, 0.0, 1.0));
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
 }`;
 
 const FRAG = `
@@ -140,6 +146,7 @@ export class Roads {
     fields: TwinFields,
     exposure: THREE.Texture,
     reveal: THREE.Texture,
+    lift: LiftUniforms,
   ) {
     // Two passes into preallocated typed arrays, same reason as buildings.ts: over
     // 42 km2 there are ~8,500 ways, and plain number[] pushes do not scale.
@@ -267,6 +274,7 @@ export class Roads {
         uCentreline: { value: HAS_CENTRELINE },
         uReveal: { value: reveal },
         uRevealOn: { value: 0 },
+        ...lift,
       },
       depthWrite: false,
     });

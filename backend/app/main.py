@@ -125,6 +125,7 @@ def zone_fields():
 
     import numpy as np
 
+    from .services import equity as equity_service
     from .services import geo
 
     z = get_zone()
@@ -149,6 +150,10 @@ def zone_fields():
             "svf": "uint8 base64, sky view factor = v / 255 (0 = deep canyon, 1 = open sky)",
             "surface": "uint8 base64, raw surface class codes (see /api/meta provenance)",
             "road": "uint8 base64, 255 = carriageway cell",
+            "vuln_static": ("uint8 base64, the time-invariant half of the SDG-10 heat "
+                            "vulnerability index in index points: v * 55 / 255. The client "
+                            "adds 45 * clamp((feels_c - 30) / 15, 0, 1) from the heat field "
+                            "it already holds to get the full 0-100 index."),
         },
         "surface_classes": {str(i): lbl for i, lbl in enumerate(CODE_LABEL) if lbl},
         "height_b64": u8(z.height, h_scale),
@@ -156,4 +161,5 @@ def zone_fields():
         "svf_b64": u8(z.svf),
         "surface_b64": base64.b64encode(z.surface.astype(np.uint8).tobytes()).decode(),
         "road_b64": base64.b64encode((z.road.astype(np.uint8) * 255).tobytes()).decode(),
+        "vuln_static_b64": u8(equity_service.static_vulnerability(), equity_service.STATIC_MAX),
     }

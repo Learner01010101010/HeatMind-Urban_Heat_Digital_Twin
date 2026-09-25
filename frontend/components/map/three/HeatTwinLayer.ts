@@ -6,7 +6,10 @@ import type { BuildingProps } from "@/lib/api";
 import { Buildings } from "./buildings";
 import type { TwinFields } from "./fields";
 import { GroundHeat } from "./groundHeat";
+import { LIFT_AMPLITUDE_M, makeLiftUniforms, type LiftUniforms } from "./lift";
+import { makeLutTexture } from "./fields";
 import { RevealField } from "./reveal";
+import { VulnerabilitySurface } from "./vulnerability";
 import { Roads, type RoadFeatureProps } from "./roads";
 import { SunExposurePass } from "./sunExposure";
 import { Trees, type TreeRecord } from "./trees";
@@ -55,6 +58,9 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
   private ground!: GroundHeat;
   private roads!: Roads;
   private reveal!: RevealField;
+  private vulnerability!: VulnerabilitySurface;
+  private lift!: LiftUniforms;
+  private equityOn = false;
   private buildings!: Buildings;
   private trees!: Trees;
 
@@ -93,11 +99,21 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     this.reveal = new RevealField(this.fields);
     const reveal = this.reveal.texture;
 
-    this.roads = new Roads(this.roadFeatures, this.fields, exposure, reveal);
+    // Built before the lifted layers so its heat keyframes exist to point them at.
     this.ground = new GroundHeat(this.fields, exposure, reveal);
-    this.buildings = new Buildings(this.buildingFeatures, this.fields, exposure, reveal);
-    this.trees = new Trees(this.treeRecords, this.fields, exposure, reveal);
+    this.lift = makeLiftUniforms(this.fields.vulnStatic);
+    this.lift.uLiftHeatA.value = this.ground.heatTextures.a;
+    this.lift.uLiftHeatB.value = this.ground.heatTextures.b;
 
+    this.roads = new Roads(this.roadFeatures, this.fields, exposure, reveal, this.lift);
+    this.buildings = new Buildings(this.buildingFeatures, this.fields, exposure, reveal, this.lift);
+    this.trees = new Trees(this.treeRecords, this.fields, exposure, reveal, this.lift);
+
+    this.vulnerability = new VulnerabilitySurface(
+      this.fields, exposure, reveal, makeLutTexture(), this.lift,
+    );
+
+    this.scene.add(this.vulnerability.mesh);
     this.scene.add(this.roads.mesh);
     this.scene.add(this.ground.mesh);
     this.scene.add(this.buildings.mesh);
@@ -120,6 +136,7 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     this.exposurePass?.dispose();
     this.roads?.dispose();
     this.reveal?.dispose();
+    this.vulnerability?.dispose();
     this.ground?.dispose();
     this.buildings?.dispose();
     this.trees?.dispose();
@@ -196,11 +213,19 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     this.buildings?.setSun(this.sunDir, intensity, e <= 2, this.sunColor, this.sun.airC);
     this.roads?.setSun(intensity, this.sunColor);
     this.trees?.setSun(this.sunDir, intensity, this.sunColor);
+    this.vulnerability?.setSun(this.sunDir, intensity, this.sunColor);
   }
 
   /** Keyframes bracketing the timeline position; blended in temperature space. */
   setKeyframes(a: FrameRef | null, b: FrameRef | null, blend: number) {
     this.ground?.setKeyframes(a, b, blend);
+    // Mirror the blend onto the lift so the relief tracks the scrubber in step
+    // with the colour, rather than a frame behind it.
+    if (this.ground && this.lift) {
+      const s = this.ground.blendState;
+      this.lift.uLiftBlend.value = s.blend;
+      this.lift.uLiftHasB.value = s.hasB;
+    }
     this.map?.triggerRepaint();
   }
 
@@ -242,6 +267,22 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
   revealRoute(coords: [number, number][], radiusM?: number) {
     if (!this.reveal) return;
     if (this.reveal.addPath(coords, radiusM)) this.map?.triggerRepaint();
+  }
+
+  /**
+   * Show the vulnerability index as lit relief, with the city riding on it.
+   *
+   * The flat heat plane steps aside while this is on: both occupy the ground, and
+   * showing temperature and vulnerability in the same place at once would leave the
+   * viewer unable to say which number a colour belongs to.
+   */
+  setEquity(on: boolean) {
+    this.equityOn = on;
+    this.vulnerability?.setVisible(on);
+    this.ground?.setVisible(!on);
+    if (this.lift) this.lift.uLiftAmp.value = on ? LIFT_AMPLITUDE_M : 0;
+    this.trees?.setLifted(on);
+    this.map?.triggerRepaint();
   }
 
   /** Turn progressive reveal on or off across every layer at once. */

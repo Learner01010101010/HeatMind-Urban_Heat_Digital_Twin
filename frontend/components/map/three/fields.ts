@@ -75,6 +75,8 @@ export interface TwinFields {
   surface: THREE.DataTexture;
   /** 255 on carriageway cells */
   road: THREE.DataTexture;
+  /** time-invariant half of the SDG-10 vulnerability index, index points = texel * 55 */
+  vulnStatic: THREE.DataTexture;
   raw: { height: Uint8Array; canopy: Uint8Array; svf: Uint8Array; surface: Uint8Array };
   dispose(): void;
 }
@@ -97,6 +99,7 @@ function build(f: ZoneFields): TwinFields {
   const svf = decodeFlipped(f.svf_b64, rows, cols);
   const surface = decodeFlipped(f.surface_b64, rows, cols);
   const road = decodeFlipped(f.road_b64, rows, cols);
+  const vulnStatic = decodeFlipped(f.vuln_static_b64, rows, cols);
 
   const tex = {
     // NEAREST: interpolating an occluder's height averages it with the zeros around it
@@ -106,6 +109,9 @@ function build(f: ZoneFields): TwinFields {
     svf: r8(svf, cols, rows, true),
     surface: r8(surface, cols, rows, false),
     road: r8(road, cols, rows, true),
+    // Linear: this drives vertex displacement, and nearest-sampling it would step
+    // the terrain into 10 m plateaus with visible seams between them.
+    vulnStatic: r8(vulnStatic, cols, rows, true),
   };
 
   return {

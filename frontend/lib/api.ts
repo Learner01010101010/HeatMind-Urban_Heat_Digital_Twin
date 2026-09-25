@@ -234,6 +234,7 @@ export interface ZoneFields {
   svf_b64: string;
   surface_b64: string;
   road_b64: string;
+  vuln_static_b64: string;
 }
 
 /** Render typology for a footprint — from OSM where tagged, inferred otherwise. */

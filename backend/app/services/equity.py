@@ -72,6 +72,26 @@ def _poi_distance_grid() -> np.ndarray:
     return best
 
 
+def static_vulnerability() -> np.ndarray:
+    """The time-invariant half of the index, in index points (0–55).
+
+    Split out so the 3D client can compute the whole index itself, live, at the full
+    10 m grid. Cooling deficit and access deficit do not change with the clock, and
+    the renderer already holds the heat field it needs for the other 45 points — so
+    only this half has to cross the wire, once, instead of shipping a fresh polygon
+    surface every time the timeline moves.
+    """
+    z = get_zone()
+    cooling_deficit = 1 - np.clip(z.canopy_cooling + z.water_cooling, 0, 1)
+    access_deficit = np.clip(_poi_distance_grid() / POI_SATURATION_M, 0, 1)
+    return 100.0 * (WEIGHTS["cooling_deficit"] * cooling_deficit
+                    + WEIGHTS["access_deficit"] * access_deficit)
+
+
+# Ceiling of static_vulnerability(), used as the uint8 encoding scale.
+STATIC_MAX = 100.0 * (WEIGHTS["cooling_deficit"] + WEIGHTS["access_deficit"])
+
+
 def vulnerability_grid(f: Frame) -> dict:
     z = get_zone()
     tw = get_twin()
