@@ -180,6 +180,27 @@ export type TransitBlock =
   | ({ available: true } & TransitPlan)
   | { available: false; reason: string };
 
+/**
+ * One turn-by-turn instruction. `exposure` is the distance-weighted sun on that
+ * stretch (0 = full shade, 1 = full sun) — a navigation step in a heat product has
+ * to carry the reason the turn exists.
+ */
+export interface RouteStep {
+  index: number;
+  maneuver: string;
+  turn_deg: number;
+  road: string;
+  instruction: string;
+  distance_m: number;
+  start_m: number;
+  duration_min: number;
+  exposure: number;
+  feels_c: number | null;
+  surface: string;
+  coords: [number, number][];
+  arrival?: boolean;
+}
+
 export interface Route {
   id: string;
   label: string;
@@ -190,6 +211,7 @@ export interface Route {
   speed_kmh?: number;
   /** Present only on a bus route. */
   transit?: TransitPlan;
+  steps: RouteStep[];
   tags: ("fastest" | "coolest" | "recommended" | "current" | "transit")[];
   geometry: [number, number][];
   duration_min: number;

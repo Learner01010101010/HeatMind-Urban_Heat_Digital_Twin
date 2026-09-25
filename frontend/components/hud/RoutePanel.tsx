@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDownUp, Check, ChevronDown, Droplets, Footprints, Loader2, Moon, Route as RouteIcon, Sparkles, Thermometer, TreePine } from "lucide-react";
+import { ArrowDownUp, Check, ChevronDown, Droplets, Footprints, Loader2, Moon, Route as RouteIcon, Sparkles, Sun, Thermometer, TreePine } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, type Route } from "@/lib/api";
@@ -11,6 +11,7 @@ import { atTime, TIMELINE, TIMELINE_MAX, useMap, usePrefs } from "@/lib/store";
 import AnimatedNumber from "@/components/ui/AnimatedNumber";
 import HeatProfileChart from "@/components/ui/HeatProfileChart";
 import RiskRing from "@/components/ui/RiskRing";
+import { StartNavButton } from "./NavHud";
 
 const ICONS: Record<string, React.ElementType> = { shade: TreePine, thermo: Thermometer, water: Droplets, road: RouteIcon, tradeoff: ArrowDownUp, moon: Moon };
 
@@ -51,6 +52,8 @@ export default function RoutePanel({ route }: { route: Route }) {
   const [logState, setLogState] = useState<"idle" | "busy" | "done" | "error">("idle");
   const [polished, setPolished] = useState<{ id: string; text: string } | null>(null);
 
+  // A transit route carries one keyframe, not thirteen — its wait does not travel
+  // with the sun — so the scrubber has nothing to interpolate and reads that point.
   const score = atTime(route.forecast.map((f) => f.score), timeMin);
   const shade = atTime(route.forecast.map((f) => f.pct_shaded), timeMin);
   const peak = atTime(route.forecast.map((f) => f.peak_feels_c), timeMin);
@@ -104,11 +107,18 @@ export default function RoutePanel({ route }: { route: Route }) {
             <span className="text-[18px] font-medium tracking-normal text-ink-400 ml-1.5">min</span>
           </div>
           <div className="text-[13px] text-ink-400 mt-2 flex items-center gap-1.5">
-            <Footprints size={13} /> {fmtDist(route.distance_m)} · walks the shady side
+            {/* "Walks the shady side" is only true on foot. A car cannot cross the
+                road for shade and saying it does would misdescribe the route. */}
+            <Footprints size={13} /> {fmtDist(route.distance_m)}
+            {route.mode && route.mode !== "walk"
+              ? ` · by ${(route.mode_label ?? route.mode).toLowerCase()}`
+              : " · walks the shady side"}
           </div>
         </div>
         <RiskRing score={score} size={92} stroke={7} label="heat risk" />
       </div>
+
+      <StartNavButton route={route} />
 
       <div className="grid grid-cols-2 gap-2.5">
         {[
@@ -142,6 +152,26 @@ export default function RoutePanel({ route }: { route: Route }) {
           </ul>
         </div>
       </Section>
+
+      {route.steps.length > 0 && (
+        <Section title="Directions" right={<span className="text-[11px] text-ink-500">{route.steps.length} steps</span>}>
+          <ol className="rounded-[22px] bg-white/[0.035] divide-y divide-white/[0.05]">
+            {route.steps.map((st) => (
+              <li key={st.index} className="flex items-start gap-3 px-4 py-2.5">
+                <span className="text-[11px] text-ink-500 tabular w-12 shrink-0 pt-0.5">{fmtDist(st.distance_m)}</span>
+                <span className="flex-1 min-w-0 text-[12.5px] text-ink-200">{st.instruction}</span>
+                {/* Marked per step, because the whole reason a step exists on this
+                    street rather than the faster one is what the sun is doing to it. */}
+                {st.exposure > 0.55 && (
+                  <span className="flex items-center gap-0.5 text-[10.5px] text-heat-4 shrink-0 pt-0.5" title="In direct sun">
+                    <Sun size={10} aria-hidden /> sun
+                  </span>
+                )}
+              </li>
+            ))}
+          </ol>
+        </Section>
+      )}
 
       <Section title="Heat along the way" right={<span className="text-[11px] text-ink-500">updates with the timeline</span>}>
         <div className="rounded-[22px] bg-white/[0.035] p-4">

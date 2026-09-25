@@ -10,6 +10,7 @@ import { fmtDelta, fmtTemp, heatColor, heatLabel, riskColor } from "@/lib/heatCo
 import { INTERVENTION_STYLE } from "@/lib/interventionStyle";
 import { POI_STYLE } from "@/lib/poiStyle";
 import { solarIntensity, solarPosition } from "@/lib/solar";
+import { alongRoute, cumulative, useNav } from "@/lib/navigation";
 import { atTime, keyframes, SCENARIO, TIMELINE, useMap, usePrefs } from "@/lib/store";
 import { HeatTwinLayer } from "./three/HeatTwinLayer";
 import { HeatTwinOverlayLayer, OVERLAY_LAYER_ID } from "./three/overlayLayer";
@@ -148,6 +149,8 @@ export default function TwinMap() {
   const compare = useMap((s) => s.compare);
   const selected = useMap((s) => s.selectedRouteId);
   const travelMode = usePrefs((s) => s.mode);
+  const navActive = useNav((s) => s.active);
+  const navRouteId = useNav((s) => s.routeId);
   const busStops = useBusStops();
   const origin = useMap((s) => s.origin);
   const destination = useMap((s) => s.destination);
@@ -498,9 +501,48 @@ export default function TwinMap() {
     // out of the ground from inside the render loop, so there is no RAF to drive here.
     map.setLayoutProperty("buildings-2d", "visibility", twin ? "none" : "visible");
     map.setPaintProperty("labels", "raster-opacity", twin ? 0.35 : 0.75);
-    map.easeTo({ pitch: twin ? 62 : 0, bearing: twin ? -28 : 0, zoom: twin ? Math.max(map.getZoom(), 16) : map.getZoom(), duration: reduceMotion ? 0 : 1400, easing: (x) => 1 - Math.pow(1 - x, 4) });
+    // While guidance is running the chase camera owns pitch, bearing and zoom.
+    // Entering the twin is part of starting navigation, so this easeTo would fire at
+    // exactly the wrong moment and yank the view back to the fixed -28 degrees.
+    if (!useNav.getState().active) {
+      map.easeTo({ pitch: twin ? 62 : 0, bearing: twin ? -28 : 0, zoom: twin ? Math.max(map.getZoom(), 16) : map.getZoom(), duration: reduceMotion ? 0 : 1400, easing: (x) => 1 - Math.pow(1 - x, 4) });
+    }
     layerRef.current?.setMode(twin);
   }, [ready, mode, reduceMotion, layerEpoch]);
+
+  // ───────── navigation: the chase camera ─────────
+  // Follows the same progress value the HUD reads, so the instruction on screen and
+  // the street under the camera can never disagree. The camera is driven per frame
+  // rather than by easeTo: easing to each new position would queue animations that
+  // fight the next one and make the view swim.
+  useEffect(() => {
+    const map = ready;
+    if (!ready || !map || !navActive) return;
+    const route = compare?.routes.find((r) => r.id === navRouteId);
+    if (!route?.geometry?.length) return;
+
+    const cum = cumulative(route.geometry);
+    let raf = 0;
+    let bearing = map.getBearing();
+    const step = () => {
+      const { progressM } = useNav.getState();
+      // Look a little ahead of the traveller: aiming the camera exactly at them puts
+      // the turn they are being told about off the bottom of the screen.
+      const lead = alongRoute(route.geometry, cum, progressM + 28);
+      // Shortest-arc damping, or the camera spins the long way round through north.
+      const delta = ((lead.bearing - bearing + 540) % 360) - 180;
+      bearing += delta * (reduceMotion ? 1 : 0.12);
+      map.jumpTo({
+        center: [lead.position[1], lead.position[0]],
+        bearing,
+        pitch: 66,
+        zoom: 17.4,
+      });
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [ready, navActive, navRouteId, compare, reduceMotion]);
 
   // hottest / coolest beacons in twin mode
   useEffect(() => {
@@ -769,7 +811,7 @@ export default function TwinMap() {
   // ───────── camera requests / cursor ─────────
   useEffect(() => {
     const map = ready;
-    if (!ready || !map || !flyTo) return;
+    if (!ready || !map || !flyTo || useNav.getState().active) return;
     // Carry the tilt when the request also switches into the twin. Asking to see a
     // stop in 3D sets mode and flyTo in the same update, so this animation and the
     // mode change's easeTo start together and the later one wins -- which landed the

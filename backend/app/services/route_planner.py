@@ -15,6 +15,7 @@ from .heat_twin_service import get_twin
 from . import break_planner
 from .prediction_service import TIMELINE_OFFSETS
 from . import modes as modes_mod
+from . import navigation
 from . import transit, transit_routing
 from .risk_scoring import CAUTION_C, PERSONAS, score_route
 from .routing_service import Path, StreetGraph
@@ -417,6 +418,7 @@ class RoutePlanner:
             "distance_m": scored0["metrics"]["distance_m"],
             "heat_risk_score": scored0["score"], "band": scored0["band"], "factors": scored0["factors"],
             "metrics": scored0["metrics"], "pois_along_route": along, "segments": segs, "forecast": forecast,
+            "steps": navigation.steps_from_segments(segs, total, speed_ms),
             "breaks": breaks, "mode": M.key, "mode_label": M.label,
             "speed_kmh": round(speed_ms * 3.6, 1),
         }
@@ -504,15 +506,50 @@ class RoutePlanner:
             "duration_min": it["total_min"], "distance_m": metrics["distance_m"],
             "heat_risk_score": scored["score"], "band": scored["band"], "factors": scored["factors"],
             "metrics": metrics, "pois_along_route": [], "segments": [], "forecast": [],
+            # A bus trip's "turns" are its legs: walk here, wait, ride, walk. Street
+            # directions for the ride would be instructions for the driver, not the
+            # passenger.
+            "steps": [
+                {
+                    "index": i, "maneuver": leg["kind"], "turn_deg": 0.0,
+                    "road": leg["to_name"],
+                    "instruction": (
+                        f"Walk to {leg['to_name']}" if leg["kind"] == "walk" else
+                        f"Wait at {leg['from_name']}" if leg["kind"] == "wait" else
+                        f"Ride to {leg['to_name']}"
+                    ),
+                    "distance_m": round(leg["distance_m"]),
+                    "start_m": 0,
+                    "duration_min": round(leg["minutes"], 1),
+                    "exposure": 1.0 if leg["kind"] == "walk" or (leg["kind"] == "wait" and not leg["sheltered"]) else 0.2,
+                    "feels_c": None, "surface": "", "coords": leg["geometry"],
+                }
+                for i, leg in enumerate(it["legs"])
+            ],
             "breaks": None, "mode": "bus", "mode_label": "Bus",
             "speed_kmh": round(transit.BUS_SPEED_MS * 3.6, 1),
             "transit": it,
         }
 
     def _fallback_name(self, road_i: int) -> str:
+        """A readable stand-in for a road OSM has not named.
+
+        These end up inside turn instructions ("Turn right onto ..."), so a raw OSM
+        class like "tertiary" cannot be passed through -- it reads as a street called
+        Tertiary. Every class gets a phrase that works as the object of that sentence.
+        """
         hw = self.road_hw[road_i]
-        return {"service": "campus/service lane", "residential": "residential lane", "track": "dirt track",
-                "footway": "footpath", "path": "footpath", "trunk": "NH48 bypass"}.get(hw, hw.replace("_", " "))
+        return {
+            "service": "campus/service lane", "residential": "residential lane",
+            "living_street": "quiet lane", "track": "dirt track",
+            "footway": "footpath", "path": "footpath", "steps": "steps",
+            "pedestrian": "pedestrian street", "cycleway": "cycle path",
+            "trunk": "NH48 bypass", "trunk_link": "bypass slip road",
+            "primary": "the main road", "primary_link": "main-road slip",
+            "secondary": "the secondary road", "secondary_link": "secondary slip",
+            "tertiary": "the link road", "tertiary_link": "link-road slip",
+            "unclassified": "unnamed road",
+        }.get(hw, hw.replace("_", " "))
 
     # ------------------------------------------------------------------
     def get(self, compare_id: str) -> dict | None:
