@@ -3,6 +3,7 @@
 import { Building2, HeartPulse, Map as MapIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useNav } from "@/lib/navigation";
 
 const ITEMS = [
   { href: "/", label: "Twin", icon: MapIcon },
@@ -14,7 +15,11 @@ const ITEMS = [
  *  "How it works" lives in the profile drawer instead. */
 export default function GlobalNav() {
   const path = usePathname();
-  if (path.startsWith("/onboarding")) return null;
+  // Guidance owns the screen. Passport and Planner are planning surfaces, and on
+  // desktop this pill is centred on the same bar the turn instruction occupies —
+  // it was drawing straight through the distance to the next turn.
+  const navigating = useNav((s) => s.active);
+  if (path.startsWith("/onboarding") || navigating) return null;
   const isOn = (href: string) => (href === "/" ? path === "/" || path.startsWith("/route") : path.startsWith(href));
 
   return (

@@ -4,14 +4,16 @@ import * as maplibregl from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
 import { api, type BuildingProps, type EquityIndex, type InterventionKind, type InterventionResult, type PackedBuildings } from "@/lib/api";
 import { runIntervention, setEndpoint } from "@/lib/actions";
-import { useBaseTime, useFrames, useMeta, useNearestFrame, usePois, useZone } from "@/lib/hooks";
+import { useBaseTime, useBusStops, useFrames, useMeta, useNearestFrame, usePois, useZone } from "@/lib/hooks";
 import { useGeo } from "@/lib/geolocation";
 import { fmtDelta, fmtTemp, heatColor, heatLabel, riskColor } from "@/lib/heatColorScale";
 import { INTERVENTION_STYLE } from "@/lib/interventionStyle";
 import { POI_STYLE } from "@/lib/poiStyle";
 import { solarIntensity, solarPosition } from "@/lib/solar";
+import { alongRoute, cumulative, useNav } from "@/lib/navigation";
 import { atTime, keyframes, SCENARIO, TIMELINE, useMap, usePrefs } from "@/lib/store";
 import { HeatTwinLayer } from "./three/HeatTwinLayer";
+import { HeatTwinOverlayLayer, OVERLAY_LAYER_ID } from "./three/overlayLayer";
 import { loadFields } from "./three/fields";
 import type { SignalRecord } from "./three/signals";
 import type { TreeRecord } from "./three/trees";
@@ -146,6 +148,10 @@ export default function TwinMap() {
   const timeMin = useMap((s) => s.timeMin);
   const compare = useMap((s) => s.compare);
   const selected = useMap((s) => s.selectedRouteId);
+  const travelMode = usePrefs((s) => s.mode);
+  const navActive = useNav((s) => s.active);
+  const navRouteId = useNav((s) => s.routeId);
+  const busStops = useBusStops();
   const origin = useMap((s) => s.origin);
   const destination = useMap((s) => s.destination);
   const pickMode = useMap((s) => s.pickMode);
@@ -236,6 +242,31 @@ export default function TwinMap() {
           "circle-stroke-width": ["case", ["get", "on"], 2, 0.5],
         },
       });
+      // Bus stops. Two layers so the boarding and alighting stops of the chosen
+      // itinerary read as chosen, rather than as two of ninety-eight identical dots.
+      map.addSource("bus-stops", { type: "geojson", data: EMPTY });
+      map.addLayer({
+        id: "bus-stops", type: "circle", source: "bus-stops", minzoom: 12,
+        paint: {
+          "circle-color": ["case", ["get", "on"], "#5bb8d4", "#2c6a7d"],
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 12, ["case", ["get", "on"], 5, 2], 17, ["case", ["get", "on"], 11, 5]],
+          "circle-opacity": ["case", ["get", "on"], 1, 0.7],
+          "circle-stroke-color": "#060606",
+          "circle-stroke-width": ["case", ["get", "on"], 2.5, 0.6],
+        },
+      });
+      map.addLayer({
+        id: "bus-stop-labels", type: "symbol", source: "bus-stops",
+        filter: ["get", "on"],
+        layout: {
+          "text-field": ["get", "name"],
+          "text-size": 12,
+          "text-offset": [0, 1.5],
+          "text-anchor": "top",
+          "text-max-width": 9,
+        },
+        paint: { "text-color": "#cfe9f2", "text-halo-color": "#060606", "text-halo-width": 1.6 },
+      });
       map.addSource("routes", { type: "geojson", data: EMPTY });
       map.addSource("route-seg", { type: "geojson", data: EMPTY });
       map.addLayer({ id: "route-casing", type: "line", source: "routes", layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": "#020306", "line-width": ["case", ["get", "sel"], 15, 9], "line-opacity": ["case", ["get", "sel"], 0.9, 0.55] } });
@@ -301,6 +332,10 @@ export default function TwinMap() {
         );
         // above the basemap, below the labels and every vector overlay
         map.addLayer(layer, "labels");
+        // ...and the twin's annotations above all of them. The route line is drawn
+        // after the twin by design, which also put it over the temperature plaques
+        // describing that very route; this second pass puts them back on top.
+        map.addLayer(new HeatTwinOverlayLayer(layer));
         layerRef.current = layer;
         added = layer;
 
@@ -323,6 +358,9 @@ export default function TwinMap() {
     return () => {
       dead = true;
       const m = mapRef.current;
+      // The overlay borrows the twin's renderer, so it has to go first: left behind,
+      // it would keep asking a disposed renderer for another pass.
+      if (m && m.getLayer(OVERLAY_LAYER_ID)) m.removeLayer(OVERLAY_LAYER_ID);
       if (added && m && m.getLayer(added.id)) m.removeLayer(added.id);
       layerRef.current = null;
     };
@@ -463,9 +501,48 @@ export default function TwinMap() {
     // out of the ground from inside the render loop, so there is no RAF to drive here.
     map.setLayoutProperty("buildings-2d", "visibility", twin ? "none" : "visible");
     map.setPaintProperty("labels", "raster-opacity", twin ? 0.35 : 0.75);
-    map.easeTo({ pitch: twin ? 62 : 0, bearing: twin ? -28 : 0, zoom: twin ? Math.max(map.getZoom(), 16) : map.getZoom(), duration: reduceMotion ? 0 : 1400, easing: (x) => 1 - Math.pow(1 - x, 4) });
+    // While guidance is running the chase camera owns pitch, bearing and zoom.
+    // Entering the twin is part of starting navigation, so this easeTo would fire at
+    // exactly the wrong moment and yank the view back to the fixed -28 degrees.
+    if (!useNav.getState().active) {
+      map.easeTo({ pitch: twin ? 62 : 0, bearing: twin ? -28 : 0, zoom: twin ? Math.max(map.getZoom(), 16) : map.getZoom(), duration: reduceMotion ? 0 : 1400, easing: (x) => 1 - Math.pow(1 - x, 4) });
+    }
     layerRef.current?.setMode(twin);
   }, [ready, mode, reduceMotion, layerEpoch]);
+
+  // ───────── navigation: the chase camera ─────────
+  // Follows the same progress value the HUD reads, so the instruction on screen and
+  // the street under the camera can never disagree. The camera is driven per frame
+  // rather than by easeTo: easing to each new position would queue animations that
+  // fight the next one and make the view swim.
+  useEffect(() => {
+    const map = ready;
+    if (!ready || !map || !navActive) return;
+    const route = compare?.routes.find((r) => r.id === navRouteId);
+    if (!route?.geometry?.length) return;
+
+    const cum = cumulative(route.geometry);
+    let raf = 0;
+    let bearing = map.getBearing();
+    const step = () => {
+      const { progressM } = useNav.getState();
+      // Look a little ahead of the traveller: aiming the camera exactly at them puts
+      // the turn they are being told about off the bottom of the screen.
+      const lead = alongRoute(route.geometry, cum, progressM + 28);
+      // Shortest-arc damping, or the camera spins the long way round through north.
+      const delta = ((lead.bearing - bearing + 540) % 360) - 180;
+      bearing += delta * (reduceMotion ? 1 : 0.12);
+      map.jumpTo({
+        center: [lead.position[1], lead.position[0]],
+        bearing,
+        pitch: 66,
+        zoom: 17.4,
+      });
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [ready, navActive, navRouteId, compare, reduceMotion]);
 
   // hottest / coolest beacons in twin mode
   useEffect(() => {
@@ -598,6 +675,31 @@ export default function TwinMap() {
     }
   }, [ready, compare, selected, mode, layerEpoch]);
 
+  // ───────── bus stops ─────────
+  // Only while the bus is in play. Ninety-eight dots over a walking route would be
+  // noise; the same dots while planning a bus trip are the thing being chosen
+  // between, and the boarding and alighting stops are named.
+  useEffect(() => {
+    const map = ready;
+    if (!ready || !map) return;
+    const src = map.getSource("bus-stops") as maplibregl.GeoJSONSource | undefined;
+    if (!src) return;
+    const busRoute = compare?.routes.find((r) => r.tags.includes("transit"));
+    const show = travelMode === "bus" && !!busStops.data;
+    if (!show) {
+      src.setData(EMPTY);
+      return;
+    }
+    const chosen = new Set([busRoute?.transit?.board.id, busRoute?.transit?.alight.id].filter(Boolean));
+    src.setData({
+      type: "FeatureCollection",
+      features: busStops.data!.features.map((f) => ({
+        ...f,
+        properties: { ...f.properties, on: chosen.has(f.properties.id) },
+      })),
+    });
+  }, [ready, travelMode, busStops.data, compare]);
+
   // ───────── POIs ─────────
   useEffect(() => {
     const map = ready;
@@ -709,7 +811,7 @@ export default function TwinMap() {
   // ───────── camera requests / cursor ─────────
   useEffect(() => {
     const map = ready;
-    if (!ready || !map || !flyTo) return;
+    if (!ready || !map || !flyTo || useNav.getState().active) return;
     // Carry the tilt when the request also switches into the twin. Asking to see a
     // stop in 3D sets mode and flyTo in the same update, so this animation and the
     // mode change's easeTo start together and the later one wins -- which landed the

@@ -14,7 +14,12 @@ router = APIRouter(prefix="/api/routes", tags=["routing"])
 @router.post("/compare")
 async def compare(req: CompareRequest):
     """≥2 candidate routes (fastest → coolest) with persona-weighted Heat Risk Scores, factor
-    breakdowns, explanations, POIs along the route and a 0–120 min departure forecast."""
+    breakdowns, explanations, POIs along the route and a 0–120 min departure forecast.
+
+    `mode` selects the vehicle: it sets the pace, restricts the search to streets that
+    mode may legally use, and scales how much of the sun reaches the traveller. `bus`
+    is answered by the transit planner instead — a walk/ride/walk itinerary over real
+    PMPML stops, with a modelled headway (see services/transit.py)."""
     for p in (req.origin, req.destination):
         if not geo.in_bbox(p.lat, p.lon, 0.002):
             raise HTTPException(422, "Point is outside the digital-twin zone (Narhe to Swargate, Pune).")
@@ -23,7 +28,7 @@ async def compare(req: CompareRequest):
         return await run_in_threadpool(
             get_planner().compare, origin=(req.origin.lat, req.origin.lon),
             destination=(req.destination.lat, req.destination.lon), persona=req.persona, scenario=req.scenario,
-            depart=depart, temp_delta=req.temp_delta_c)
+            depart=depart, temp_delta=req.temp_delta_c, mode=req.mode)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 

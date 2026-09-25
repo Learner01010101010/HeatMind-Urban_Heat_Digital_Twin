@@ -10,16 +10,20 @@ import { InsightChip, InsightPanel } from "@/components/hud/InsightChip";
 import InterventionPanel from "@/components/hud/InterventionPanel";
 import MyLocation from "@/components/hud/MyLocation";
 import ModeToggle from "@/components/hud/ModeToggle";
+import ModeSelector from "@/components/hud/ModeSelector";
+import NavHud from "@/components/hud/NavHud";
 import { ProfileButton, ProfilePanel } from "@/components/hud/Profile";
 import RouteSheet from "@/components/hud/RouteSheet";
 import SearchPill from "@/components/hud/SearchPill";
 import SimulateButton from "@/components/hud/SimulateButton";
+import SunChip from "@/components/hud/SunChip";
 import Timeline from "@/components/hud/Timeline";
 import Drawer from "@/components/ui/Drawer";
 import { runCompare } from "@/lib/actions";
 import { useFrameLoader, useHydrated } from "@/lib/hooks";
 import { INTERVENTION_STYLE } from "@/lib/interventionStyle";
 import { useClock, useMap, usePrefs, type PickMode } from "@/lib/store";
+import { useNav } from "@/lib/navigation";
 import { useMedia } from "@/lib/useMedia";
 
 const TwinMap = dynamic(() => import("@/components/map/TwinMap"), { ssr: false, loading: () => <div className="absolute inset-0 bg-ink-950" /> });
@@ -47,6 +51,9 @@ export default function Home() {
   const pickMode = useMap((s) => s.pickMode);
   const set = useMap((s) => s.set);
   const base = useClock((s) => s.base);
+  const navActive = useNav((s) => s.active);
+  const navRouteId = useNav((s) => s.routeId);
+  const navRoute = navActive ? compare?.routes.find((r) => r.id === navRouteId) ?? null : null;
   const close = () => set({ panel: null });
 
   useEffect(() => {
@@ -62,7 +69,11 @@ export default function Home() {
     if (m.origin && m.destination && !m.tempDelta && !m.simOffsetMin) void runCompare({ silent: true });
   }, [base]);
 
-  const sheet = compare ? (
+  // Guidance takes the screen. Route comparison, the forecast scrubber and the
+  // intervention tools are all planning surfaces — they are answering a question the
+  // traveller has already answered by starting, and on a phone held at walking pace
+  // they are in the way of the one instruction that matters.
+  const sheet = navRoute ? null : compare ? (
     <RouteSheet compare={compare} variant={wide ? "side" : "bottom"} />
   ) : loading ? (
     <div className={`glass-strong skeleton rounded-[26px] ${wide ? "w-[340px] h-[240px]" : "w-full h-[118px]"}`} />
@@ -75,11 +86,23 @@ export default function Home() {
     <main className="fixed inset-0 overflow-clip bg-ink-950">
       <TwinMap />
 
+      {/* ── guidance: the only thing on screen while it runs ── */}
+      {navRoute && (
+        <div className="absolute top-0 inset-x-0 z-40 p-3 md:p-5 pt-[max(12px,env(safe-area-inset-top))] flex justify-center pointer-events-none">
+          <NavHud route={navRoute} />
+        </div>
+      )}
+
       {/* ── top: search · (global nav is centred by the layout) · mode · profile ── */}
-      <div className="absolute top-0 inset-x-0 z-30 p-3 md:p-5 pt-[max(12px,env(safe-area-inset-top))] pointer-events-none">
+      <div className={`absolute top-0 inset-x-0 z-30 p-3 md:p-5 pt-[max(12px,env(safe-area-inset-top))] pointer-events-none ${navRoute ? "hidden" : ""}`}>
         <div className="flex items-start gap-2.5">
-          <div className="pointer-events-auto flex-1 md:flex-none min-w-0">
+          <div className="pointer-events-auto flex-1 md:flex-none min-w-0 flex flex-col gap-2.5 items-start">
             <SearchPill />
+            {/* Travel mode belongs with the trip inputs, not the view controls: it
+                changes the answer, where Map/Heat Twin only changes the picture. */}
+            <div className="hidden md:block">
+              <ModeSelector />
+            </div>
           </div>
           <div className="pointer-events-auto ml-auto flex items-center gap-2.5">
             {/* The global nav is fixed to the centre of this same bar, so the view
@@ -111,7 +134,7 @@ export default function Home() {
            The dividers do that instead — what you're looking at, what it says,
            what you can change. */}
       {!wide && (
-        <div className="absolute right-3 top-[76px] z-30 glass rounded-[26px] p-1.5 flex flex-col gap-1">
+        <div className={`absolute right-3 top-[76px] z-30 glass rounded-[26px] p-1.5 flex flex-col gap-1 ${navRoute ? "hidden" : ""}`}>
           <ModeToggle compact />
           <EquityToggle compact />
           <span className="h-px mx-2.5 bg-white/[0.07]" aria-hidden />
@@ -135,9 +158,12 @@ export default function Home() {
       )}
 
       {/* ── bottom ── */}
-      {wide ? (
+      {navRoute ? null : wide ? (
         <div className="absolute bottom-0 inset-x-0 z-30 p-5 pointer-events-none flex items-end gap-3">
-          <div className="pointer-events-auto shrink-0">
+          <div className="pointer-events-auto shrink-0 flex flex-col items-start gap-2">
+            {/* The sun readout sits with the timeline: scrubbing moves both the sun in
+                the 3D sky and this number, which is what ties the two together. */}
+            <SunChip />
             <InsightChip />
           </div>
           <div className="pointer-events-auto flex-1 min-w-0 max-w-[600px] mx-auto">
@@ -151,6 +177,9 @@ export default function Home() {
         </div>
       ) : (
         <div className="absolute inset-x-0 bottom-[calc(56px+env(safe-area-inset-bottom))] z-30 p-2 flex flex-col gap-2 pointer-events-none">
+          <div className="pointer-events-auto self-center max-w-full overflow-x-auto no-scrollbar">
+            <ModeSelector compact />
+          </div>
           {sheet && <div className="pointer-events-auto">{sheet}</div>}
           <div className="pointer-events-auto">
             <Timeline compact />

@@ -68,12 +68,15 @@ Optional: `set ANTHROPIC_API_KEY=...` before starting the backend enables an LLM
 | **AI Shadow Engine** | `services/shadow_engine.py`, `services/solar.py` | NOAA solar ephemeris gives sun elevation and azimuth. Every cell ray-marches toward the sun through the building-height and tree-canopy fields. Building shadow polygons are cast at `h / tan(elev)` toward `azimuth + 180°`. |
 | **Sky View Factor** | `services/svf.py` | 32-azimuth horizon scan of the building-height raster, `SVF = 1 - mean(sin²θ_max)`. Independent of sun and weather, so it is computed once and disk-cached (~0.6 s). One field, two consumers: the canyon physics term above, and the ambient occlusion in the 3D renderer. |
 | **Future Heat Prediction** | `services/prediction_service.py` | Physics-informed nowcast from now to +3 h (15-minute keyframes): shadows are recomputed for the future sun position, and air temperature and RH are interpolated from the Open-Meteo hourly forecast (or the demo scenario curve). |
-| **Personalized Heat Risk Engine** | `services/risk_scoring.py` | Six transparent factors (cumulative exposure, peak heat index, shade, exertion, rest/water gaps, surface radiant heat), each weighted per persona (Student / Outdoor Worker / Senior / Cyclist) into a 0–100 score. Personas also differ in speed, vulnerability shift and daily budget. |
+| **Personalized Heat Risk Engine** | `services/risk_scoring.py` | Six transparent factors (cumulative exposure, peak heat index, shade, exertion, rest/water gaps, surface radiant heat), each weighted per persona (Student / Outdoor Worker / Senior / Delivery Rider) into a 0–100 score. Personas differ in vulnerability shift, weights and daily budget; the **travel mode** supplies speed, sun exposure and exertion on top (`services/modes.py`), and all three default to the pedestrian values so a walking route scores exactly as it did before modes existed. |
 | **Digital Heat Passport** | `services/passport_service.py` | Minutes in NOAA "danger" heat vs. a daily budget, shaded distance, rest stops, streaks and badges, stored in SQLite under an anonymous session token. |
 
 Plus:
 
-- **Heat-aware routing** (`services/routing_service.py`): Dijkstra over the real OSM street graph. A sweep of heat-aversion weights combined with the penalty method yields ≥2 distinct routes from fastest to coolest. Walkers are sampled on the shady kerb, cyclists on the carriageway.
+- **Heat-aware routing** (`services/routing_service.py`): Dijkstra over the real OSM street graph. A sweep of heat-aversion weights combined with the penalty method yields ≥2 distinct routes from fastest to coolest. Pedestrians are sampled on the shady kerb, vehicles on the carriageway. Routing is **time-aware**: each street is costed by the sun that will be on it when the traveller arrives, not the sun at departure — over a 100-minute walk the azimuth swings ~25°, and freezing it routes people into shade that has moved. At 13:00 in late September the shade-first walk across this zone carries **46% shade against the fastest route's 23%**, for 15 extra minutes and 10 fewer risk points.
+- **Travel modes** (`services/modes.py`): walk / cycle / bike / car / bus, composed with persona rather than baked into it — a senior on a bike is a senior's vulnerability at a bike's speed. Each mode sets its pace (scaled by the congestion curve, which puts a car below a two-wheeler in the evening peak, as Pune does), the streets it may use (cars and two-wheelers off footways and steps; buses also off service lanes), and `heat_exposure` — how much of the weather actually reaches the traveller. That last one is what keeps a car from detouring a kilometre for a tree it is sealed away from.
+- **Bus itineraries** (`services/transit.py`, `services/transit_routing.py`): walk → wait → ride → walk over **98 real OSM bus stops** (31 tagged PMPML, 20 with shelters). Stop choice trades walking distance against shelter, because the wait is the most exposed part of the trip. No PMPML timetable is published for this corridor, so the headway and ride time are **modelled** and say so everywhere they appear.
+- **Turn-by-turn navigation** (`services/navigation.py`): maneuvers derived from the route's own display segments, so each step carries the sun exposure of the stretch it describes — the HUD warns that the next street is in full sun before you are standing in it.
 - **Explainability** (`services/explanation_service.py`): every score ships with a rule-based "why" (shade %, peak °C along a named street, water points, trade-off vs. the fastest route), with an optional LLM polish that falls back silently.
 - **Simulate** (`POST /api/routes/simulate`): advance the clock or spike the temperature. Every route is re-scored in under 1 s, and you get a reroute suggestion if your route is no longer the safest.
 
@@ -92,6 +95,8 @@ overlay floating above the map.
 | `roads.ts` | The 473 real OSM ways as ground ribbons at their true widths, with kerbs and dashed centre lines on classified roads. Drawn *below* the heat plane so the carriageway reads through it and gets tinted by the temperature above. |
 | `reveal.ts` | Progressive reveal: a coverage field painted by each position fix. Ground already walked stays visible, so the twin builds up along the route taken. Every shader multiplies by it, so heat, roads, buildings and canopy appear together. |
 | `trees.ts` | 2,452 canopies + trunks as two InstancedMeshes, sized from the zone's own `radius_m` / `density`. Canopy planted by the intervention simulator is appended live and casts real shadow on the next march. |
+| `sunDisc.ts` | The sun itself, on a dome around the view centre at its true azimuth and elevation, billboarded in clip space so its pixel size is exact whatever the projection does with pitch. Shadows have always been cast from the NOAA position; nothing on screen said where the light was coming from, so they swung across the streets as the timeline scrubbed for no visible reason. |
+| `overlayLayer.ts` | A second custom layer, added *after* the route lines, that renders the twin's annotation scene through the same renderer and camera. The twin sits below `labels` so route lines and symbols stay legible over the buildings — which also meant the route line painted over the temperature plaques describing it. Depth state cannot arbitrate between two MapLibre layers in a painter's algorithm; a later paint slot can. |
 | `lib/solar.ts` | Port of the backend NOAA solar algorithm, so sun position is continuous while scrubbing instead of snapping between 15-minute keyframes. |
 
 Two things this replaced, both worth knowing about:
@@ -164,7 +169,10 @@ GET  /api/heat/layers?time              cooling corridors, hot streets, hotspots
 GET  /api/heat/point?lat&lon           probe one location
 GET  /api/shadow?time                  building shadow polygons
 GET  /api/pois?type=water,rest,shade,cooling_center
-POST /api/routes/compare               { origin, destination, persona, scenario, depart_at }
+GET  /api/transit/stops                real OSM bus stops (name, operator, shelter) as GeoJSON
+GET  /api/transit/describe             what the transit layer measures vs. assumes
+POST /api/routes/compare               { origin, destination, persona, mode, scenario, depart_at }
+                                       mode: walk | cycle | bike | car | bus
 POST /api/routes/simulate              { compare_id, route_id, simulate: { time_offset_min, temp_delta_c } }
 GET  /api/routes/{route_id}
 GET  /api/risk/explain?route_id&polish_llm=true
@@ -182,6 +190,8 @@ POST /api/passport/log                 { user_id, route_id, rest_stops_taken }
 | Building heights | OSM `building:levels` where tagged (25 buildings), typology estimate otherwise |
 | Tree canopy | **Estimated**: per-street avenue/bare assignment plus campus and lake-edge vegetation (OSM has no tree survey here) |
 | Water / rest / shade points | OSM amenities plus seeded points (flagged `source: "seeded"`) |
+| Bus stops | **Real** (OSM public-transport tags; PMPML operator where recorded) |
+| Bus timetable | **Modelled** — none published for this corridor; headway and ride time are assumed, not scheduled |
 | Sun position | **Real** (NOAA algorithm) |
 | Weather | Open-Meteo at the live current time · Pune climatology fallback (offline) |
 | Heat surface | **Modelled** (physics-informed synthetic, PRD §9) |

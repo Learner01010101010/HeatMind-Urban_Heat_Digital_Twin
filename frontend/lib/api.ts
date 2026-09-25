@@ -1,6 +1,8 @@
 // Typed fetch wrappers for the HeatMind FastAPI backend (proxied at /api via next.config rewrites).
 
 export type Persona = "student" | "worker" | "senior" | "cyclist" | "gig_worker";
+/** How the trip is made — orthogonal to persona. See backend services/modes.py. */
+export type TravelMode = "walk" | "cycle" | "bike" | "car" | "bus";
 export type Scenario = "demo" | "live";
 
 export interface Weather {
@@ -98,7 +100,12 @@ export interface RouteMetrics {
   distance_m: number;
   heat_dose: number;
   minutes_danger: number;
+  /** Minutes out of direct sun, as the traveller experiences it. */
   pct_shaded: number;
+  /** The street's own shade, before any vehicle shielding. */
+  pct_shaded_street: number;
+  /** True when the mode shields the traveller, so pct_shaded is about the vehicle. */
+  shielded: boolean;
   peak_feels_c: number;
   mean_feels_c: number;
   pct_asphalt: number;
@@ -134,12 +141,83 @@ export interface Explanation {
   source: "rule_based" | "llm";
 }
 
+/** One stop on a bus itinerary. Real OpenStreetMap data — see /api/transit/stops. */
+export interface BusStop {
+  id: string;
+  name: string;
+  lat: number;
+  lon: number;
+  operator: string;
+  shelter: boolean;
+  source: string;
+}
+
+export interface TransitLeg {
+  kind: "walk" | "wait" | "ride";
+  from_name: string;
+  to_name: string;
+  minutes: number;
+  distance_m: number;
+  geometry: [number, number][];
+  sheltered?: boolean;
+}
+
+/**
+ * A bus itinerary. `schedule_source` is always "modelled": the stops are real but no
+ * PMPML timetable is published for this corridor, so the wait and ride time are
+ * assumptions and the UI must not present them as departures.
+ */
+export interface TransitPlan {
+  legs: TransitLeg[];
+  board: BusStop;
+  alight: BusStop;
+  total_min: number;
+  walk_m: number;
+  ride_m: number;
+  intermediate_stops: number;
+  headway_min: number;
+  wait_min: number;
+  schedule_source: "modelled";
+  disclaimer: string;
+}
+
+export type TransitBlock =
+  | ({ available: true } & TransitPlan)
+  | { available: false; reason: string };
+
+/**
+ * One turn-by-turn instruction. `exposure` is the distance-weighted sun on that
+ * stretch (0 = full shade, 1 = full sun) — a navigation step in a heat product has
+ * to carry the reason the turn exists.
+ */
+export interface RouteStep {
+  index: number;
+  maneuver: string;
+  turn_deg: number;
+  road: string;
+  instruction: string;
+  distance_m: number;
+  start_m: number;
+  duration_min: number;
+  exposure: number;
+  feels_c: number | null;
+  surface: string;
+  coords: [number, number][];
+  arrival?: boolean;
+}
+
 export interface Route {
   id: string;
   label: string;
   title: string;
   color: string;
-  tags: ("fastest" | "coolest" | "recommended" | "current")[];
+  mode?: TravelMode;
+  mode_label?: string;
+  speed_kmh?: number;
+  /** Present only on a bus route. */
+  transit?: TransitPlan;
+  steps: RouteStep[];
+  tags: ("fastest" | "coolest" | "recommended" | "current" | "transit")[];
   geometry: [number, number][];
   duration_min: number;
   distance_m: number;
@@ -166,6 +244,14 @@ export interface CompareResult {
   origin: { lat: number; lon: number; snapped: [number, number] };
   destination: { lat: number; lon: number; snapped: [number, number] };
   conditions: Conditions;
+  mode: TravelMode;
+  mode_label: string;
+  /** Speed of the chosen mode. For bus this is the bus, not the walk beside it. */
+  speed_kmh: number;
+  /** Pace of the street routes shown alongside — a walk when the mode is bus. */
+  street_speed_kmh: number;
+  mode_note: string;
+  transit: TransitBlock | null;
   recommended_id: string;
   best_departure: { offset_min: number; time: string; score: number; score_now: number; improvement: number; advice: string };
   routes: Route[];
@@ -608,7 +694,9 @@ export const api = {
     scenario: Scenario;
     depart_at?: string;
     temp_delta_c?: number;
+    mode?: TravelMode;
   }) => req<CompareResult>("/api/routes/compare", { method: "POST", json: body }),
+  busStops: () => req<GeoJSON.FeatureCollection<GeoJSON.Point, BusStop>>("/api/transit/stops"),
   simulate: (body: { compare_id: string; route_id?: string; simulate: { time_offset_min: number; temp_delta_c: number } }) =>
     req<CompareResult>("/api/routes/simulate", { method: "POST", json: body }),
   route: (id: string) => req<Route>(`/api/routes/${encodeURIComponent(id)}`),

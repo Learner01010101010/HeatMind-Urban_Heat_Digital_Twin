@@ -15,6 +15,7 @@ import { BreakBeacons, type BreakBeaconRecord } from "./breakBeacons";
 import { Landcover } from "./landcover";
 import { Roads, type RoadFeatureProps } from "./roads";
 import { TrafficSignals, type SignalRecord } from "./signals";
+import { SunDisc } from "./sunDisc";
 import { SunExposurePass } from "./sunExposure";
 import { Trees, type TreeRecord } from "./trees";
 
@@ -56,6 +57,22 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
   private map!: maplibregl.Map;
   private renderer!: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
+  /**
+   * Annotations that must outrank everything MapLibre paints, not just everything
+   * three.js does.
+   *
+   * The twin is inserted *below* the "labels" layer so the route lines, POI symbols
+   * and basemap labels stay legible on top of the buildings. MapLibre paints its
+   * layers in list order, so anything in `scene` is on the canvas before
+   * route-casing/halo/heat/core go down — and the route line then covers the
+   * temperature plaques that describe it, no matter what depth state the pins ask
+   * for. `depthTest: false` cannot help: it only orders draws within this one pass.
+   *
+   * So the plaques live here instead, and `renderOverlay` is driven by a second
+   * custom layer added *after* the route layers. Same renderer, same camera, same
+   * matrix — just a later slot in MapLibre's paint order.
+   */
+  private readonly overlayScene = new THREE.Scene();
   private readonly camera = new THREE.Camera();
 
   private exposurePass!: SunExposurePass;
@@ -64,6 +81,7 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
   private reveal!: RevealField;
   private vulnerability!: VulnerabilitySurface;
   private pins!: RoutePins;
+  private sunDisc!: SunDisc;
   private lift!: LiftUniforms;
   private equityOn = false;
   /** The route the pins describe, and the heat grid they were placed against.
@@ -138,7 +156,9 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     this.beacons.set(this.beaconRecords, this.fields);
 
     this.scene.add(this.vulnerability.mesh);
-    this.scene.add(this.pins.mesh);
+    this.overlayScene.add(this.pins.mesh); // see overlayScene: painted after the route lines
+    this.sunDisc = new SunDisc(this.fields.origin);
+    this.overlayScene.add(this.sunDisc.group);
     this.scene.add(this.landcover.mesh);
     this.scene.add(this.roads.mesh);
     this.scene.add(this.ground.mesh);
@@ -160,13 +180,17 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
   /** Render counters for the development hook above. */
   readonly debug = { renders: 0 };
 
+  private disposed = false;
+
   onRemove() {
+    this.disposed = true;
     this.exposurePass?.dispose();
     this.roads?.dispose();
     this.landcover?.dispose();
     this.reveal?.dispose();
     this.vulnerability?.dispose();
     this.pins?.dispose();
+    this.sunDisc?.dispose();
     this.ground?.dispose();
     this.buildings?.dispose();
     this.trees?.dispose();
@@ -212,6 +236,12 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
       this.trees?.setBudget(mpp <= 0.6 ? Infinity : mpp <= 1.6 ? 46000 : mpp <= 4 ? 18000 : 7000);
       const cv = this.map.getCanvas();
       this.pins.setViewport(cv.width, cv.height);
+      // The sun rides the view rather than the zone: anchored to the map centre it
+      // stays on screen wherever the user pans, which is what makes it a compass for
+      // the shadows rather than a fixed object somewhere over Narhe.
+      const c = this.map.getCenter();
+      this.sunDisc?.setAnchor(c.lat, c.lng);
+      this.sunDisc?.setViewport(cv.width, cv.height);
     }
 
     if (this.plantGrow < 1) {
@@ -232,20 +262,41 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
       this.lastMarchMs = performance.now() - t0;
     }
 
-    // MapLibre v6 exposes several matrices here and only one of them is the
-    // mercator-to-clip transform a custom layer wants. `modelViewProjectionMatrix`
-    // is NOT it — feeding it mercator [0,1] coordinates puts the scene tens of
-    // thousands of clip units off screen. Since the projection refactor that added
-    // globe support, the transform for the default (mercator) projection lives in
-    // `defaultProjectionData.mainMatrix`, whose space `tileMercatorCoords` reports
-    // as [0, 0, 1, 1] — i.e. whole-world mercator, which is what LocalOrigin targets.
-    this.camera.projectionMatrix = new THREE.Matrix4()
-      .fromArray(args.defaultProjectionData.mainMatrix as unknown as number[])
-      .multiply(this.fields.origin.localToWorld);
+    this.syncCamera(args);
 
     this.debug.renders++;
     this.renderer.resetState();
     this.renderer.render(this.scene, this.camera);
+  }
+
+  /**
+   * Second pass: the annotation scene, driven by a custom layer sitting above the
+   * route lines. See `overlayScene` for why the plaques cannot ride the main pass.
+   *
+   * MapLibre has drawn its own line layers into the same canvas between the two
+   * calls, so the GL state it left behind has to be dropped again before three.js
+   * submits — `resetState` is not redundant with the one in `render`.
+   */
+  renderOverlay(args: maplibregl.CustomRenderMethodInput) {
+    if (this.disposed || !this.renderer || !this.pins) return;
+    this.syncCamera(args);
+    this.renderer.resetState();
+    this.renderer.render(this.overlayScene, this.camera);
+  }
+
+  /**
+   * MapLibre v6 exposes several matrices here and only one of them is the
+   * mercator-to-clip transform a custom layer wants. `modelViewProjectionMatrix`
+   * is NOT it — feeding it mercator [0,1] coordinates puts the scene tens of
+   * thousands of clip units off screen. Since the projection refactor that added
+   * globe support, the transform for the default (mercator) projection lives in
+   * `defaultProjectionData.mainMatrix`, whose space `tileMercatorCoords` reports
+   * as [0, 0, 1, 1] — i.e. whole-world mercator, which is what LocalOrigin targets.
+   */
+  private syncCamera(args: maplibregl.CustomRenderMethodInput) {
+    this.camera.projectionMatrix = new THREE.Matrix4()
+      .fromArray(args.defaultProjectionData.mainMatrix as unknown as number[])
+      .multiply(this.fields.origin.localToWorld);
   }
 
   // -------------------------------------------------------------------- state
@@ -274,6 +325,7 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     this.trees?.setSun(this.sunDir, intensity, this.sunColor);
     this.vulnerability?.setSun(this.sunDir, intensity, this.sunColor);
     this.pins?.setSun(this.sunDir, intensity, this.sunColor);
+    this.sunDisc?.setSun(this.sun.elevationDeg, this.sun.azimuthDeg);
     this.signals?.setSun(intensity);
   }
 
