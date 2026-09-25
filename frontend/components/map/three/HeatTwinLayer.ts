@@ -97,6 +97,8 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
   private beacons!: BreakBeacons;
   /** Kept so the beacons survive a layer rebuild and a mode change. */
   private beaconRecords: BreakBeaconRecord[] = [];
+  /** Same, for canopy planted by the intervention simulator. */
+  private plantedTreeRecords: TreeRecord[] = [];
 
   private sun: SunState = { elevationDeg: 45, azimuthDeg: 180, intensity: 1 };
   private sunDir = new THREE.Vector3(0, 0, 1);
@@ -149,18 +151,11 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     this.lift.uLiftHeatA.value = this.ground.heatTextures.a;
     this.lift.uLiftHeatB.value = this.ground.heatTextures.b;
 
-    this.landcover = new Landcover(this.fields, exposure, reveal, this.lift);
-    this.roads = new Roads(this.roadFeatures, this.fields, exposure, reveal, this.lift,
-                           this.junctionRecords);
-    this.buildings = new Buildings(this.buildingFeatures, this.fields, exposure, reveal, this.lift);
-    this.trees = new Trees(this.treeRecords, this.fields, exposure, reveal, this.lift);
-
     this.vulnerability = new VulnerabilitySurface(
       this.fields, exposure, reveal, makeLutTexture(), this.lift,
     );
 
     this.pins = new RoutePins(this.fields, reveal, makeLutTexture(), this.lift);
-    this.signals = new TrafficSignals(this.signalRecords, this.fields, exposure, reveal, this.lift);
     this.beacons = new BreakBeacons(this.fields, this.lift);
     this.beacons.set(this.beaconRecords, this.fields);
 
@@ -168,15 +163,16 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     this.overlayScene.add(this.pins.mesh); // see overlayScene: painted after the route lines
     this.sunDisc = new SunDisc(this.fields.origin);
     this.overlayScene.add(this.sunDisc.group);
-    this.scene.add(this.landcover.mesh);
-    this.scene.add(this.roads.mesh);
     this.scene.add(this.ground.mesh);
-    this.scene.add(this.buildings.mesh);
-    this.scene.add(this.trees.canopy);
-    this.scene.add(this.signals.mesh);
     this.scene.add(this.beacons.mesh);
-    this.scene.add(this.trees.trunks);
 
+    // The three heavy builders run on later frames -- see buildDeferred. Buildings
+    // alone is ~2.85 million vertices and ~130 MB of attributes; with roads and
+    // 103,775 canopies behind it, doing the lot here is one long main-thread block
+    // with the map frozen behind a spinner. Staging them changes nothing about what
+    // is built, only when, so the scene ends up identical either way -- but the map
+    // is interactive throughout and fills in rather than appearing all at once.
+    this.buildDeferred(exposure, reveal);
     this.applySun();
     // Development hook: lets the render pipeline be inspected and the GPU exposure
     // field compared against the backend's shade grid from the console. Not wired to
@@ -186,6 +182,73 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     }
   }
 
+  /**
+   * Build the heavy layers over successive frames rather than in one block.
+   *
+   * Ordered by what a user needs first: landcover and roads give the map its shape,
+   * buildings are the point of the twin, canopy and signals are detail. Each stage
+   * yields to the browser, so touch, pan and the HUD stay live while the rest lands
+   * -- on a phone the alternative is several seconds of a frozen spinner.
+   *
+   * requestAnimationFrame rather than a microtask or setTimeout(0): rAF runs after
+   * the browser has had a chance to paint, which is precisely the yield being bought
+   * here. A microtask would run before paint and stage nothing.
+   */
+  private buildDeferred(exposure: THREE.Texture, reveal: THREE.Texture) {
+    const stages: (() => void)[] = [
+      () => {
+        this.landcover = new Landcover(this.fields, exposure, reveal, this.lift);
+        this.scene.add(this.landcover.mesh);
+        this.landcover.setVisible(this.grow > 0.002);
+      },
+      () => {
+        this.roads = new Roads(this.roadFeatures, this.fields, exposure, reveal, this.lift,
+                               this.junctionRecords);
+        this.scene.add(this.roads.mesh);
+        this.roads.setSun(this.sun.elevationDeg > 0 ? this.sun.intensity : 0, this.sunColor);
+      },
+      () => {
+        this.buildings = new Buildings(this.buildingFeatures, this.fields, exposure, reveal, this.lift);
+        this.scene.add(this.buildings.mesh);
+        this.buildings?.setGrow(this.grow);
+        this.buildings.mesh.visible = this.grow > 0.002;
+        this.applySun(); // the building shader needs the current sun, not the default
+      },
+      () => {
+        this.trees = new Trees(this.treeRecords, this.fields, exposure, reveal, this.lift);
+        this.scene.add(this.trees.canopy);
+        this.scene.add(this.trees.trunks);
+        const visible = this.grow > 0.002;
+        this.trees.canopy.visible = visible;
+        this.trees.trunks.visible = visible;
+        this.trees.setPlantGrow(this.plantGrow);
+        if (this.plantedTreeRecords.length) this.trees.setPlanted(this.plantedTreeRecords, this.fields);
+      },
+      () => {
+        this.signals = new TrafficSignals(this.signalRecords, this.fields, exposure, reveal, this.lift);
+        this.scene.add(this.signals.mesh);
+        this.signals.setGrow(this.grow);
+        this.applySun();
+        // Everything that depends on a pixel scale was skipped while it did not
+        // exist, and the early-out in render() would keep skipping it until the
+        // camera happened to move. Force one pass so the new layers are sized.
+        this.lastMpp = -1;
+      },
+    ];
+
+    let i = 0;
+    const step = () => {
+      if (this.disposed) return;
+      stages[i++]();
+      this.map?.triggerRepaint();
+      if (i < stages.length) this.buildRaf = requestAnimationFrame(step);
+      else this.buildRaf = 0;
+    };
+    this.buildRaf = requestAnimationFrame(step);
+  }
+
+  private buildRaf = 0;
+
   /** Render counters for the development hook above. */
   readonly debug = { renders: 0 };
 
@@ -193,6 +256,7 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
 
   onRemove() {
     this.disposed = true;
+    if (this.buildRaf) cancelAnimationFrame(this.buildRaf);
     this.exposurePass?.dispose();
     this.roads?.dispose();
     this.landcover?.dispose();
@@ -220,7 +284,7 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     } else {
       this.grow = this.growTarget;
     }
-    this.buildings.setGrow(this.grow);
+    this.buildings?.setGrow(this.grow);
     // Markers ride the same mode easing: flat labels on the 2D map, standing
     // signs at the z plane in the twin, animated between the two.
     this.pins?.setGrow(this.grow);
@@ -272,16 +336,18 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
       }
     }
 
-    if (this.plantGrow < 1) {
+    if (this.plantGrow < 1 && this.trees) {
       this.plantGrow = Math.min(1, this.plantGrow + 0.05);
       this.trees.setPlantGrow(this.plantGrow);
       this.map.triggerRepaint();
     }
 
     const visible = this.grow > 0.002;
-    this.buildings.mesh.visible = visible;
-    this.trees.canopy.visible = visible;
-    this.trees.trunks.visible = visible;
+    if (this.buildings) this.buildings.mesh.visible = visible;
+    if (this.trees) {
+      this.trees.canopy.visible = visible;
+      this.trees.trunks.visible = visible;
+    }
     this.landcover?.setVisible(visible);
 
     // the sun march only re-runs when the sun has actually moved
@@ -512,6 +578,10 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
 
   /** Canopy planted by the intervention simulator this session. */
   setPlantedTrees(records: TreeRecord[]) {
+    // Kept whether or not the canopy layer exists yet: the deferred build takes a
+    // few frames, and a tree planted inside that window would otherwise vanish.
+    // Same reason beacons keep their records across a layer rebuild.
+    this.plantedTreeRecords = records;
     if (!this.trees) return;
     const grew = records.length > this.trees.planted_count;
     this.trees.setPlanted(records, this.fields);
