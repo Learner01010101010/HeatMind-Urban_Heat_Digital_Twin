@@ -162,6 +162,16 @@ interface MapState {
   routeView: RouteView; // left route sheet: comparison list or one route's detail
   sheetOpen: boolean; // route sheet expanded (vs. collapsed to its header)
   timeMin: number; // continuous 0…180
+  /**
+   * True while the timeline is being dragged or played.
+   *
+   * The 3D twin re-marches its shadow buffer whenever the sun moves, and a scrub
+   * delivers a burst of positions that would each force one. Knowing a gesture is in
+   * progress lets it coarsen the step during the drag and land the exact position
+   * once the finger lifts. Only the timeline can tell the difference between that
+   * and the sun moving because time passed.
+   */
+  timeScrubbing: boolean;
   simOffsetMin: number;
   tempDelta: number;
   loading: boolean;
@@ -199,6 +209,7 @@ export const useMap = create<MapState>()((set) => ({
   routeView: "list",
   sheetOpen: true,
   timeMin: 0,
+  timeScrubbing: false,
   simOffsetMin: 0,
   tempDelta: 0,
   loading: false,

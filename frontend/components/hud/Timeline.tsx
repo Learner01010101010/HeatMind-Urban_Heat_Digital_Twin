@@ -25,6 +25,13 @@ export default function Timeline({ compact = false }: { compact?: boolean }) {
   const [playing, setPlaying] = useState(false);
   const raf = useRef(0);
 
+  // Playback sweeps three hours in seconds, which is the same burst of sun
+  // positions a drag produces — so it gets the same treatment.
+  useEffect(() => {
+    set({ timeScrubbing: playing });
+    return () => set({ timeScrubbing: false });
+  }, [playing, set]);
+
   useEffect(() => {
     if (!playing) return;
     let last = performance.now();
@@ -92,6 +99,17 @@ export default function Timeline({ compact = false }: { compact?: boolean }) {
           setPlaying(false);
           set({ timeMin: Number(e.target.value) });
         }}
+        // Bracket the gesture so the twin can coarsen its shadow march during the
+        // drag and re-march exactly once when it ends. onPointerUp alone is not
+        // enough: a drag that leaves the control ends in a cancel, and a scrub left
+        // permanently "in progress" would never settle to full granularity.
+        onPointerDown={() => set({ timeScrubbing: true })}
+        onPointerUp={() => set({ timeScrubbing: false })}
+        onPointerCancel={() => set({ timeScrubbing: false })}
+        onLostPointerCapture={() => set({ timeScrubbing: false })}
+        onKeyDown={() => set({ timeScrubbing: true })}
+        onKeyUp={() => set({ timeScrubbing: false })}
+        onBlur={() => set({ timeScrubbing: false })}
         aria-label="Forecast time"
         aria-valuetext={live ? "now" : `plus ${Math.round(timeMin)} minutes`}
       />

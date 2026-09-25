@@ -1,6 +1,7 @@
 "use client";
 
 import * as THREE from "three";
+import { deviceProfile, supersampleFor } from "@/lib/deviceProfile";
 import type { TwinFields } from "./fields";
 
 /**
@@ -20,6 +21,13 @@ import type { TwinFields } from "./fields";
  * a penumbra term. The sun subtends ~0.53 deg, so a shadow edge softens in proportion
  * to the occluder's distance — the single biggest cue that separates a real shadow
  * from a stencil.
+ */
+/**
+ * Upper bound on the supersample factor. The *effective* factor is whatever the
+ * device's pixel budget allows (see lib/deviceProfile), because this factor's cost
+ * is quadratic in the zone size: 6x was ~1.4 MP on the original zone and is 13.4 MP
+ * on the grown one, and would be worse again on a bigger one. A factor alone cannot
+ * express "as fine as this device can afford".
  */
 const SUPERSAMPLE = 6;
 const SUN_ANGULAR_RADIUS = 0.00465; // tan of ~0.266 deg
@@ -125,9 +133,13 @@ export class SunExposurePass {
   private readonly material: THREE.ShaderMaterial;
   private lastKey = "";
 
+  /** The factor actually used, after the device budget. Exposed for the debug hook. */
+  readonly supersample: number;
+
   constructor(private readonly fields: TwinFields) {
-    const w = fields.cols * SUPERSAMPLE;
-    const h = fields.rows * SUPERSAMPLE;
+    this.supersample = Math.min(SUPERSAMPLE, supersampleFor(fields.cols, fields.rows));
+    const w = fields.cols * this.supersample;
+    const h = fields.rows * this.supersample;
     this.target = new THREE.WebGLRenderTarget(w, h, {
       format: THREE.RGBAFormat,
       type: THREE.UnsignedByteType,
@@ -162,9 +174,25 @@ export class SunExposurePass {
     this.scene.add(quad);
   }
 
-  /** Re-march only when the sun has actually moved (0.25 deg granularity). */
-  update(renderer: THREE.WebGLRenderer, elevDeg: number, azDeg: number): boolean {
-    const key = `${Math.round(elevDeg * 4)}|${Math.round(azDeg * 4)}`;
+  /**
+   * Re-march only when the sun has actually moved.
+   *
+   * `moving` coarsens the threshold while the timeline is being dragged. Scrubbing
+   * three hours swings the sun about 45 degrees, which at the resting granularity is
+   * ~180 full marches of a multi-megapixel target during one gesture — the single
+   * worst moment in the app on a phone. Coarsening it during the drag does not
+   * freeze the shadows: the scene relights every frame from this buffer regardless,
+   * so they keep moving, in slightly larger steps.
+   *
+   * The moment the drag stops, `moving` goes false, the fine threshold no longer
+   * matches the last key, and one final march lands the exact position. Nothing is
+   * left approximate once the user stops moving, which is when they look closely.
+   */
+  update(renderer: THREE.WebGLRenderer, elevDeg: number, azDeg: number, moving = false): boolean {
+    const p = deviceProfile();
+    const stepDeg = moving ? p.sunStepDegScrub : p.sunStepDegRest;
+    const q = 1 / stepDeg;
+    const key = `${Math.round(elevDeg * q)}|${Math.round(azDeg * q)}|${moving ? "m" : "r"}`;
     if (key === this.lastKey) return false;
     this.lastKey = key;
 
