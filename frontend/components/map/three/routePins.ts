@@ -27,13 +27,17 @@ import { REVEAL_GLSL } from "./reveal";
 
 /** How far apart to probe the route when deciding where a pin belongs. */
 const PROBE_STEP_M = 12;
-/** A new pin goes down once the reading has moved this far from the last one. */
-const THRESHOLD_C = 1.2;
+/** A new pin goes down once the reading has moved this far from the last one.
+ *  Raised from 1.2: at that sensitivity an ordinary street's block-to-block noise
+ *  was enough to trigger a marker, so the route filled up with pins recording
+ *  differences too small to change anyone's mind about where to walk. */
+const THRESHOLD_C = 2.4;
 /** ...and one goes down anyway after this much unbroken sameness, so a long flat
  *  stretch still carries a reading rather than a gap. */
-const MAX_GAP_M = 700;
-/** Never two pins closer than this, whatever the gradient does. */
-const MIN_GAP_M = 90;
+const MAX_GAP_M = 1100;
+/** Never two pins closer than this, whatever the gradient does — roughly a block,
+ *  so two markers cannot describe the same stretch of street. */
+const MIN_GAP_M = 260;
 
 /** Hard cap on markers, so a pathological route cannot allocate without bound. */
 const MAX_PINS = 600;
@@ -94,10 +98,15 @@ function makeLabelAtlas(): THREE.CanvasTexture {
   // upside down — and an inverted "42" reads as mirrored rather than as obviously
   // flipped, which is why it looked like a UV bug rather than an orientation one.
   t.flipY = false;
-  t.minFilter = THREE.LinearMipmapLinearFilter;
+  // No mipmaps. The atlas is one tall strip of rows, so every mip level averages
+  // neighbouring temperatures into each other — at small sizes a plaque showing 34
+  // rendered a smear of 31 through 37 stacked on top of one another, which looked
+  // like the scene bleeding through rather than a filtering artefact. Linear
+  // filtering on the base level costs a little sharpness when the label is tiny and
+  // is correct at every size.
+  t.minFilter = THREE.LinearFilter;
   t.magFilter = THREE.LinearFilter;
-  t.generateMipmaps = true;
-  t.anisotropy = 4;
+  t.generateMipmaps = false;
   return t;
 }
 
@@ -109,8 +118,11 @@ attribute float aFeels;     // this marker's reading, °C
 
 uniform vec2 uExtent;
 uniform float uScale;
+// 0 in the flat map, 1 in the 3D twin, eased between the two. It collapses the
+// stem to nothing and drops the plaque onto the ground, so the same marker is a
+// flat label on a 2D map and a standing sign in the twin, with no second code path.
 uniform float uGrow;
-uniform vec2 uHeadM;   // plaque half-size in world metres, derived from the camera
+uniform vec2 uHeadNDC; // plaque half-size in clip units: pixels / viewport
 
 varying float vFeels;
 varying float vPart;
@@ -152,9 +164,16 @@ void main() {
     vNormal = vec3(0.0, 0.0, 1.0);
     vec3 anchor = (instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
     anchor.z += groundZ + ${STEM_H_M.toFixed(1)} * s;
-    vec4 mv = modelViewMatrix * vec4(anchor, 1.0);
-    mv.xy += position.xy * uHeadM;
-    gl_Position = projectionMatrix * mv;
+
+    // Offset in CLIP space, not view space. MapLibre's matrix is a mercator
+    // projection, so its "view space" axes are not the screen's and offsetting there
+    // sheared every plaque into a parallelogram — subtly at pitch 0, badly under
+    // bearing. Clip space is the screen by definition, so the quad comes out square
+    // at any pitch and bearing, and multiplying by w cancels the perspective divide
+    // so the label is an exact pixel size at any distance.
+    vec4 clip = projectionMatrix * modelViewMatrix * vec4(anchor, 1.0);
+    clip.xy += position.xy * uHeadNDC * clip.w;
+    gl_Position = clip;
   }
 }`;
 
@@ -255,7 +274,7 @@ export class RoutePins {
         uSunColor: { value: new THREE.Color(1, 0.94, 0.86) },
         uSunIntensity: { value: 0 },
         uScale: { value: 1 },
-        uHeadM: { value: new THREE.Vector2(8, 4) },
+        uHeadNDC: { value: new THREE.Vector2(0.06, 0.06) },
         uGrow: { value: 1 },
         uReveal: { value: reveal },
         uRevealOn: { value: 0 },
@@ -267,7 +286,9 @@ export class RoutePins {
       // Plaques overlap each other on a winding route; writing depth would let
       // whichever drew first punch a hole in the rest.
       depthWrite: false,
-      depthTest: true,
+      // Annotation, so it is not occluded by the city it annotates. It also removes
+      // any question of the flat 2D plaque z-fighting the ground plane it lies on.
+      depthTest: false,
       side: THREE.DoubleSide,
     });
 
@@ -358,16 +379,31 @@ export class RoutePins {
     return this.mesh.count;
   }
 
+  /** 0 lays the marker flat on the map; 1 stands it up at the z plane. */
+  setGrow(g: number) {
+    this.material.uniforms.uGrow.value = g;
+  }
+
   setPixelScale(metresPerPixel: number) {
-    const u = this.material.uniforms;
-    // Stem still scales like the rest of the scene, so it stays a believable object
-    // standing on the street.
-    u.uScale.value = Math.min(MAX_SCALE, Math.max(1, metresPerPixel / REF_M_PER_PX));
-    // Plaque holds its size on screen: half-extent in metres = half-extent in pixels
-    // times the current metres-per-pixel.
-    (u.uHeadM.value as THREE.Vector2).set(
-      (HEAD_PX_W / 2) * metresPerPixel,
-      (HEAD_PX_H / 2) * metresPerPixel,
+    // The stem scales like the rest of the scene, so it stays a believable object
+    // standing on the street. The plaque does not: see setViewport.
+    this.material.uniforms.uScale.value = Math.min(
+      MAX_SCALE, Math.max(1, metresPerPixel / REF_M_PER_PX),
+    );
+  }
+
+  /**
+   * Size the plaque from the drawing buffer, in exact pixels.
+   *
+   * NDC spans -1..1 across the viewport, so one pixel is 2/width; a half-extent of
+   * HEAD_PX_W/2 pixels is therefore HEAD_PX_W/width in clip units. No
+   * metres-per-pixel involved, which is why this survives pitch, bearing and
+   * perspective that a world-space size does not.
+   */
+  setViewport(widthPx: number, heightPx: number) {
+    (this.material.uniforms.uHeadNDC.value as THREE.Vector2).set(
+      HEAD_PX_W / Math.max(widthPx, 1),
+      HEAD_PX_H / Math.max(heightPx, 1),
     );
   }
 

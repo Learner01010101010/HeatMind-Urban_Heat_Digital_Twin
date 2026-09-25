@@ -167,6 +167,9 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
       this.grow = this.growTarget;
     }
     this.buildings.setGrow(this.grow);
+    // Markers ride the same mode easing: flat labels on the 2D map, standing
+    // signs at the z plane in the twin, animated between the two.
+    this.pins?.setGrow(this.grow);
 
     // Keep the route's temperature profile readable as the camera pulls back.
     // Recomputed per frame rather than on a zoom event: MapLibre eases zoom over
@@ -177,6 +180,8 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
       const mpp = (156543.03392 * Math.cos(lat)) / Math.pow(2, z);
       this.pins.setPixelScale(mpp);
       this.roads?.setPixelScale(mpp);
+      const cv = this.map.getCanvas();
+      this.pins.setViewport(cv.width, cv.height);
     }
 
     if (this.plantGrow < 1) {
