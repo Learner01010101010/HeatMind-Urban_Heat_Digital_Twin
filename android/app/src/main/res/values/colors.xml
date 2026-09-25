@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matched to the web app's palette so the launch frame does not flash a
+         different background before the page paints. -->
+    <color name="ink_950">#FF04060B</color>
+    <color name="ink_400">#FF8B8F98</color>
+    <color name="ink_100">#FFE8EAED</color>
+    <color name="cool_300">#FF6FF0DA</color>
+</resources>
