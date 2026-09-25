@@ -63,6 +63,11 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
   private pins!: RoutePins;
   private lift!: LiftUniforms;
   private equityOn = false;
+  /** The route the pins describe, and the heat grid they were placed against.
+   *  Both are kept so a timeline move can re-place them: the markers sit where the
+   *  temperature changes, and where that is depends on the frame. */
+  private pinRoute: [number, number][] = [];
+  private pinHeat: Uint8Array | null = null;
   private buildings!: Buildings;
   private trees!: Trees;
 
@@ -244,6 +249,14 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
       this.lift.uLiftBlend.value = s.blend;
       this.lift.uLiftHasB.value = s.hasB;
     }
+    // Re-place the markers against the frame now showing. They mark where the
+    // temperature changes, and a different hour changes where that is — leaving them
+    // put would label the right streets with last hour's readings.
+    const heat = (blend < 0.5 ? a?.heat : b?.heat ?? a?.heat) ?? null;
+    if (heat && heat !== this.pinHeat) {
+      this.pinHeat = heat;
+      if (this.pinRoute.length) this.pins?.setRoute(this.pinRoute, heat);
+    }
     this.map?.triggerRepaint();
   }
 
@@ -311,8 +324,9 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
    * an empty array to clear.
    */
   setRoutePins(coords: [number, number][]) {
+    this.pinRoute = coords;
     if (!this.pins) return;
-    if (coords.length) this.pins.setRoute(coords);
+    if (coords.length) this.pins.setRoute(coords, this.pinHeat);
     else this.pins.clear();
     this.map?.triggerRepaint();
   }

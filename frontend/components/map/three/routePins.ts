@@ -6,116 +6,174 @@ import { LIFT_GLSL, type LiftUniforms } from "./lift";
 import { REVEAL_GLSL } from "./reveal";
 
 /**
- * The route's thermal profile, stood up on the route itself.
+ * Temperature markers along a route — placed where the temperature actually changes.
  *
- * A route line coloured by temperature tells you the order of things but not the
- * size of them: the difference between 34 °C and 41 °C is two shades of orange, and
- * nobody can read a number off that. As a row of pins whose *height* is the
- * temperature, the profile becomes a bar chart lying along the street — you can see
- * the exposed stretch rear up and the shaded stretch drop away, and judge how much
- * of the walk is spent in each.
+ * The first version put a pin down every 45 m, which on a cross-city route is a
+ * picket fence: hundreds of markers, nearly all of them repeating the number their
+ * neighbour already showed. A marker earns its place by telling you something new,
+ * so the route is walked at a fine step and a pin is dropped only when the reading
+ * has moved by THRESHOLD_C since the last one — plus both endpoints, and a failsafe
+ * so a long thermally-flat stretch is not left completely unlabelled.
  *
- * Every pin reads its own temperature from the heat keyframes on the GPU, at the
- * cell it stands on. Nothing is precomputed and sent per pin, so the whole profile
- * re-scales and re-colours as the timeline is scrubbed, for free. They ride the
- * vulnerability terrain with the rest of the scene, and they honour the corridor
- * reveal, so they appear with the street rather than floating ahead of it.
+ * What that gives you is a marker at the mouth of every shaded stretch and every
+ * exposed one and nothing in between. Two hundred pins become a couple of dozen,
+ * and each marks a transition worth knowing about.
  *
- * One InstancedMesh, one draw call, whatever the route length.
+ * Each is a real marker: a tapered stem standing on the street with a screen-facing
+ * plaque above it carrying the reading in degrees. The plaque is billboarded in view
+ * space so it stays square to the camera at any pitch or bearing, and its background
+ * is the heat colour, so a pin reads at a glance and reads exactly up close.
  */
 
-/** Metres between pins along the route. Close enough to resolve a single shaded
- *  block, far enough that a 9 km cross-city route is a few hundred instances. */
-export const PIN_SPACING_M = 45;
+/** How far apart to probe the route when deciding where a pin belongs. */
+const PROBE_STEP_M = 12;
+/** A new pin goes down once the reading has moved this far from the last one. */
+const THRESHOLD_C = 1.2;
+/** ...and one goes down anyway after this much unbroken sameness, so a long flat
+ *  stretch still carries a reading rather than a gap. */
+const MAX_GAP_M = 700;
+/** Never two pins closer than this, whatever the gradient does. */
+const MIN_GAP_M = 90;
 
-/** Pin height = base + (feels − reference) × metres-per-degree, clamped. Tuned so a
- *  comfortable street is a low stud and a dangerous one is unmistakably tall, on a
- *  scale that reads against four-storey buildings rather than dwarfing them. */
-const PIN_BASE_M = 6.0;
-const PIN_REF_C = 26.0;
-const PIN_M_PER_C = 2.6;
-const PIN_MAX_RISE_C = 22.0;
-const PIN_RADIUS_M = 3.0;
+/** Hard cap on markers, so a pathological route cannot allocate without bound. */
+const MAX_PINS = 600;
+
+// --- marker proportions, in metres at true scale --------------------------------
+const STEM_H_M = 16.0;
+const STEM_R_M = 0.85;
+/**
+ * The plaque is sized in SCREEN PIXELS, not metres.
+ *
+ * Sizing it in world units was exactly backwards for a label: it shrank as you
+ * zoomed in to read it, bottoming out around 18 px wide — too small for "34°" at
+ * the one moment you actually wanted the number. A label holds its size on screen;
+ * the world size is derived from the camera each frame to make that happen.
+ */
+const HEAD_PX_W = 52;
+const HEAD_PX_H = 29;
+
+/** Metres per screen pixel at which markers are drawn at true world scale; past
+ *  that they scale up so they stay legible instead of vanishing. */
+const REF_M_PER_PX = 1.15;
+const MAX_SCALE = 7.0;
+
+// --- the label atlas -------------------------------------------------------------
+const LABEL_MIN_C = 15;
+const LABEL_MAX_C = 60;
+const LABEL_ROWS = LABEL_MAX_C - LABEL_MIN_C + 1;
+const LABEL_W = 192;
+const LABEL_H = 96;
 
 /**
- * Metres per screen pixel at which pins are drawn at true world scale.
+ * One texture holding every whole-degree label the twin can show.
  *
- * Below that the profile is scaled up so it keeps roughly the same apparent size
- * instead of vanishing. This is not cosmetic: the app fits the whole route on
- * screen the moment you plan one, and at that zoom a 3 m pin is a fifth of a pixel
- * wide. Scaling radius and height by the same factor keeps the bar chart's relative
- * shape exact — only its size on screen is held steady, the way a chart's axes do
- * not shrink when you look at more of it.
+ * Pre-rendered rather than drawn per marker: the set of possible readings is small
+ * and fixed, so a single upload covers every pin on every route and the shader picks
+ * its row by temperature. No per-pin canvas work, no DOM overlay to keep in sync with
+ * a 3D camera, and the type stays crisp because it is rasterised text rather than
+ * geometry.
  */
-const PIN_REF_M_PER_PX = 1.15;
-/** Ceiling on the width scaling — enough to stay visible, not enough to merge. */
-const PIN_MAX_RADIUS_SCALE = 5.0;
-/** Height grows more slowly and stops sooner. Scaling it as hard as the width turned
- *  the profile into a 96 m wall at route-fitted zoom: solid, and unreadable as a
- *  profile, which is the only reason it exists. */
-const PIN_MAX_HEIGHT_SCALE = 2.6;
-/** Target gap between pins on screen, in pixels. As the camera pulls back the pins
- *  are thinned to hold roughly this spacing, so they stay countable marks instead of
- *  fusing into a ribbon — the same level-of-detail decimation a map label engine
- *  does, and for the same reason. */
-const PIN_TARGET_PX_GAP = 15.0;
-
-/** Hard cap on instances, so a pathological route cannot allocate without bound. */
-const MAX_PINS = 4000;
+function makeLabelAtlas(): THREE.CanvasTexture {
+  const c = document.createElement("canvas");
+  c.width = LABEL_W;
+  c.height = LABEL_H * LABEL_ROWS;
+  const g = c.getContext("2d")!;
+  g.clearRect(0, 0, c.width, c.height);
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  g.font = `700 ${Math.round(LABEL_H * 0.54)}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+  for (let i = 0; i < LABEL_ROWS; i++) {
+    // Dark ink, not white: the plaque carries the heat colour, and at the hot end
+    // that is saturated orange-red, on which white type all but disappears.
+    g.fillStyle = "rgba(14,13,11,0.94)";
+    g.fillText(`${LABEL_MIN_C + i}°`, LABEL_W / 2, i * LABEL_H + LABEL_H / 2);
+  }
+  const t = new THREE.CanvasTexture(c);
+  // Three flips textures vertically by default, which would put v = 0 at the bottom
+  // of the canvas. The row lookup below indexes from the top, so the labels came out
+  // upside down — and an inverted "42" reads as mirrored rather than as obviously
+  // flipped, which is why it looked like a UV bug rather than an orientation one.
+  t.flipY = false;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.magFilter = THREE.LinearFilter;
+  t.generateMipmaps = true;
+  t.anisotropy = 4;
+  return t;
+}
 
 const VERT = `
 precision highp float;
 
-attribute float aSeed;
+attribute float aPart;      // 0 = stem, 1 = plaque
+attribute float aFeels;     // this marker's reading, °C
 
 uniform vec2 uExtent;
-uniform float uGrow;        // 0..1 reveal animation when a new route lands
-uniform float uPinRadiusScale;   // screen-size compensation for width
-uniform float uPinHeightScale;   // ...and, more gently, for height
+uniform float uScale;
+uniform float uGrow;
+uniform vec2 uHeadM;   // plaque half-size in world metres, derived from the camera
+
 varying float vFeels;
-varying float vUp;          // 0 at the foot of the pin, 1 at its cap
+varying float vPart;
+varying vec2 vQuad;         // -1..1 across the plaque
 varying vec2 vGround;
 varying vec3 vNormal;
+varying float vUp;
 ${LIFT_GLSL}
 
 void main() {
-  // Instance translation is the pin's position on the ground.
+  vFeels = aFeels;
+  vPart = aPart;
+
   vec2 gxy = (instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xy;
   vGround = gxy;
   vec2 uv = clamp(gxy / uExtent, 0.0, 1.0);
+  float groundZ = liftAt(uv);
+  float s = uScale * uGrow;
 
-  float feels = feelsAt(uv);
-  vFeels = feels;
-
-  float rise = clamp(feels - ${PIN_REF_C.toFixed(1)}, 0.0, ${PIN_MAX_RISE_C.toFixed(1)});
-  float h = (${PIN_BASE_M.toFixed(1)} + rise * ${PIN_M_PER_C.toFixed(1)}) * uGrow * uPinHeightScale;
-
-  // The cylinder is authored unit-height along z with its base at 0, so scaling z
-  // grows it upward from the pavement rather than about its middle.
-  vec3 local = position;
-  vUp = local.z;
-  local.xy *= ${PIN_RADIUS_M.toFixed(1)} * uPinRadiusScale;
-  local.z *= h;
-
-  vNormal = normalize(mat3(instanceMatrix) * normal);
-
-  vec4 world = instanceMatrix * vec4(local, 1.0);
-  world.z += liftAt(uv);   // stand on the vulnerability terrain with everything else
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(world.xyz, 1.0);
+  if (aPart < 0.5) {
+    // --- stem: an ordinary world-space object standing on the street -------------
+    vec3 local = position;
+    vUp = local.z;
+    local.xy *= ${STEM_R_M.toFixed(2)} * s;
+    local.z *= ${STEM_H_M.toFixed(1)} * s;
+    vNormal = normalize(mat3(instanceMatrix) * normal);
+    vQuad = vec2(0.0);
+    vec4 world = instanceMatrix * vec4(local, 1.0);
+    world.z += groundZ;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(world.xyz, 1.0);
+  } else {
+    // --- plaque: billboarded in view space ---------------------------------------
+    // Offsetting after the model-view transform makes the quad square to the camera
+    // whatever the map's pitch and bearing, which a world-space quad cannot be. It
+    // also keeps the label the same shape from every angle, which matters more for
+    // something being read as text than for anything else in the scene.
+    vQuad = position.xy;
+    vUp = 1.0;
+    vNormal = vec3(0.0, 0.0, 1.0);
+    vec3 anchor = (instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+    anchor.z += groundZ + ${STEM_H_M.toFixed(1)} * s;
+    vec4 mv = modelViewMatrix * vec4(anchor, 1.0);
+    mv.xy += position.xy * uHeadM;
+    gl_Position = projectionMatrix * mv;
+  }
 }`;
 
 const FRAG = `
 precision highp float;
 
 uniform sampler2D uLut;
+uniform sampler2D uLabels;
 uniform vec2 uExtent;
 uniform vec3 uSunDir;
 uniform vec3 uSunColor;
 uniform float uSunIntensity;
+
 varying float vFeels;
-varying float vUp;
+varying float vPart;
+varying vec2 vQuad;
 varying vec2 vGround;
 varying vec3 vNormal;
+varying float vUp;
 ${REVEAL_GLSL}
 
 void main() {
@@ -123,36 +181,54 @@ void main() {
   float rv = revealAt(uv);
   if (rv < 0.15) discard;
 
-  // Same LUT, same encoding as the ground plane: a pin and the tarmac under it at
-  // the same temperature are the same colour, which is the entire point of having
-  // one scale in the product.
-  vec3 col = texture2D(uLut, vec2(clamp((vFeels - 20.0) * 4.0 / 255.0, 0.0, 1.0), 0.5)).rgb;
+  // Same LUT and encoding as the ground plane, so a marker and the street under it
+  // at the same temperature are the same colour.
+  vec3 heat = texture2D(uLut, vec2(clamp((vFeels - 20.0) * 4.0 / 255.0, 0.0, 1.0), 0.5)).rgb;
 
-  // Lit enough to read as a solid object rather than a flat decal, but kept bright
-  // near the cap so the colour — which is the reading — survives the shading.
-  float ndl = max(dot(normalize(vNormal), uSunDir), 0.0);
-  float shade = 0.62 + 0.38 * ndl * max(uSunIntensity, 0.35);
-  col *= mix(shade, 1.0, smoothstep(0.55, 1.0, vUp));
+  if (vPart < 0.5) {
+    float ndl = max(dot(normalize(vNormal), uSunDir), 0.0);
+    // Lit by the same sun as the rest of the scene, so a marker at dusk warms with
+    // everything around it instead of staying lit by a light that is not there.
+    vec3 col = heat * (0.55 + 0.45 * ndl * max(uSunIntensity, 0.4) * uSunColor);
+    // darker at the foot, so the stem reads as standing on the street rather than
+    // smearing into it
+    col *= mix(0.40, 1.0, smoothstep(0.0, 0.5, vUp));
+    gl_FragColor = vec4(col * rv, rv);
+    return;
+  }
 
-  // Darkened foot, so a dense run of pins still reads as separate objects standing
-  // on a surface instead of merging into one coloured mass.
-  col *= mix(0.45, 1.0, smoothstep(0.0, 0.22, vUp));
+  // --- plaque --------------------------------------------------------------------
+  // Rounded-rectangle signed distance, so the plaque has a real edge rather than the
+  // hard corners of the quad it is drawn on.
+  float r = 0.42;
+  vec2 d = abs(vQuad) - (vec2(1.0) - vec2(r));
+  float sd = length(max(d, 0.0)) + min(max(d.x, d.y), 0.0) - r;
 
-  // The cap carries a touch of self-illumination: it is the end of the bar, and the
-  // height of that cap is the number being reported.
-  col += col * smoothstep(0.88, 1.0, vUp) * 0.5;
+  float aa = max(fwidth(sd) * 1.2, 0.002);
+  float body = 1.0 - smoothstep(-aa, aa, sd);
+  if (body < 0.01) discard;
 
-  gl_FragColor = vec4(col * rv, rv);
+  // A rim slightly brighter than the fill lifts the plaque off whatever is behind it.
+  float rim = smoothstep(-0.10 - aa, -0.10 + aa, sd) * body;
+
+  float idx = clamp(floor(vFeels + 0.5) - ${LABEL_MIN_C.toFixed(1)}, 0.0, ${(LABEL_ROWS - 1).toFixed(1)});
+  vec2 luv = vec2(vQuad.x * 0.5 + 0.5, (idx + (0.5 - vQuad.y * 0.5)) / ${LABEL_ROWS.toFixed(1)});
+  float ink = texture2D(uLabels, luv).a;
+
+  // Lift the fill so the dark end of the scale still reads as a label rather than a
+  // hole, then lay the type over it.
+  vec3 col = mix(heat * 1.14 + vec3(0.06), heat * 1.5 + vec3(0.10), rim);
+  col = mix(col, vec3(0.055, 0.05, 0.045), ink);
+
+  float a = body * rv;
+  gl_FragColor = vec4(col * a, a);
 }`;
 
 export class RoutePins {
   readonly mesh: THREE.InstancedMesh;
   private readonly material: THREE.ShaderMaterial;
+  private readonly feels: Float32Array;
   private readonly capacity = MAX_PINS;
-  /** Every resampled point on the route, in local metres. The instance buffer holds
-   *  a stride-decimated subset of these, chosen for the current camera. */
-  private points: Array<[number, number]> = [];
-  private stride = 1;
 
   constructor(
     private readonly fields: TwinFields,
@@ -160,13 +236,12 @@ export class RoutePins {
     lut: THREE.Texture,
     lift: LiftUniforms,
   ) {
-    // Unit height, base at z = 0, so the vertex shader can scale it by temperature.
-    const geo = new THREE.CylinderGeometry(1, 0.72, 1, 7, 1, false);
-    geo.rotateX(Math.PI / 2);   // three's cylinder runs along y; the twin is z-up
-    geo.translate(0, 0, 0.5);   // base at the origin rather than straddling it
+    const geo = buildMarkerGeometry();
+    this.feels = new Float32Array(this.capacity);
+    geo.setAttribute("aFeels", new THREE.InstancedBufferAttribute(this.feels, 1));
 
-    const w = this.fields.cols * this.fields.cellM;
-    const h = this.fields.rows * this.fields.cellM;
+    const w = fields.cols * fields.cellM;
+    const h = fields.rows * fields.cellM;
 
     this.material = new THREE.ShaderMaterial({
       vertexShader: VERT,
@@ -174,13 +249,14 @@ export class RoutePins {
       uniforms: {
         ...lift,
         uLut: { value: lut },
+        uLabels: { value: makeLabelAtlas() },
         uExtent: { value: new THREE.Vector2(w, h) },
         uSunDir: { value: new THREE.Vector3(0, 0, 1) },
         uSunColor: { value: new THREE.Color(1, 0.94, 0.86) },
         uSunIntensity: { value: 0 },
+        uScale: { value: 1 },
+        uHeadM: { value: new THREE.Vector2(8, 4) },
         uGrow: { value: 1 },
-        uPinRadiusScale: { value: 1 },
-        uPinHeightScale: { value: 1 },
         uReveal: { value: reveal },
         uRevealOn: { value: 0 },
       },
@@ -188,60 +264,90 @@ export class RoutePins {
       blending: THREE.CustomBlending,
       blendSrc: THREE.OneFactor,
       blendDst: THREE.OneMinusSrcAlphaFactor,
-      depthWrite: true,
+      // Plaques overlap each other on a winding route; writing depth would let
+      // whichever drew first punch a hole in the rest.
+      depthWrite: false,
+      depthTest: true,
+      side: THREE.DoubleSide,
     });
-
-    geo.setAttribute(
-      "aSeed",
-      new THREE.InstancedBufferAttribute(new Float32Array(this.capacity), 1),
-    );
 
     this.mesh = new THREE.InstancedMesh(geo, this.material, this.capacity);
     this.mesh.frustumCulled = false;
-    this.mesh.renderOrder = 4;
+    this.mesh.renderOrder = 6;   // annotation: on top of the scene it describes
     this.mesh.count = 0;
   }
 
   /**
-   * Lay pins along a route, resampled to a fixed spacing.
+   * Place markers along a route, using the frame's own heat grid to decide where.
    *
-   * Resampled rather than placed on the route's own vertices: OSM nodes cluster at
-   * junctions and thin out along straight runs, so using them directly would read as
-   * a density map of the road network instead of an evenly-paced profile.
+   * `heat` is the raw uint8 grid as the API sends it — row-major from the north
+   * edge, feels_c = 20 + v/4. Read here rather than on the GPU because the placement
+   * rule compares each reading against the last pin's, which is a sequential walk
+   * and not something a shader can do.
    */
-  setRoute(coords: [number, number][]) {
-    this.points = [];
-    if (coords.length >= 2) {
-      const pts = coords.map(([la, lo]) => this.fields.origin.toXY(la, lo));
-      this.points.push([pts[0][0], pts[0][1]]);
-      let carry = 0;
-      for (let i = 0; i < pts.length - 1 && this.points.length < this.capacity; i++) {
-        const [ax, ay] = pts[i];
-        const [bx, by] = pts[i + 1];
-        const seg = Math.hypot(bx - ax, by - ay);
-        if (seg < 1e-6) continue;
-        let d = PIN_SPACING_M - carry;
-        while (d <= seg && this.points.length < this.capacity) {
-          this.points.push([ax + ((bx - ax) * d) / seg, ay + ((by - ay) * d) / seg]);
-          d += PIN_SPACING_M;
-        }
-        carry = (carry + seg) % PIN_SPACING_M;
-      }
+  setRoute(coords: [number, number][], heat: Uint8Array | null) {
+    if (coords.length < 2 || !heat) {
+      this.mesh.count = 0;
+      return;
     }
-    this.upload();
-  }
+    const { rows, cols, cellM, origin } = this.fields;
+    const readAt = (x: number, y: number): number => {
+      const c = Math.max(0, Math.min(cols - 1, Math.floor(x / cellM)));
+      const fromSouth = Math.max(0, Math.min(rows - 1, Math.floor(y / cellM)));
+      // the payload runs from the north edge; the local frame runs from the south
+      return 20 + heat[(rows - 1 - fromSouth) * cols + c] / 4;
+    };
 
-  /** Write the stride-decimated subset of `points` into the instance buffer. */
-  private upload() {
-    const m = new THREE.Matrix4();
-    let n = 0;
-    for (let i = 0; i < this.points.length && n < this.capacity; i += this.stride) {
-      m.makeTranslation(this.points[i][0], this.points[i][1], 0);
-      this.mesh.setMatrixAt(n, m);
-      n++;
+    const pts = coords.map(([la, lo]) => origin.toXY(la, lo));
+    const picked: Array<{ x: number; y: number; feels: number }> = [];
+
+    let lastFeels = readAt(pts[0][0], pts[0][1]);
+    picked.push({ x: pts[0][0], y: pts[0][1], feels: lastFeels });
+    let lastX = pts[0][0];
+    let lastY = pts[0][1];
+    let sinceLast = 0;
+    let carry = 0;
+
+    for (let i = 0; i < pts.length - 1 && picked.length < this.capacity; i++) {
+      const [ax, ay] = pts[i];
+      const [bx, by] = pts[i + 1];
+      const seg = Math.hypot(bx - ax, by - ay);
+      if (seg < 1e-6) continue;
+      let d = PROBE_STEP_M - carry;
+      while (d <= seg && picked.length < this.capacity) {
+        const x = ax + ((bx - ax) * d) / seg;
+        const y = ay + ((by - ay) * d) / seg;
+        sinceLast += Math.hypot(x - lastX, y - lastY);
+        lastX = x;
+        lastY = y;
+
+        const f = readAt(x, y);
+        if (sinceLast >= MIN_GAP_M
+            && (Math.abs(f - lastFeels) >= THRESHOLD_C || sinceLast >= MAX_GAP_M)) {
+          picked.push({ x, y, feels: f });
+          lastFeels = f;
+          sinceLast = 0;
+        }
+        d += PROBE_STEP_M;
+      }
+      carry = (carry + seg) % PROBE_STEP_M;
     }
-    this.mesh.count = n;
+
+    // The destination always carries a reading, however flat the approach was.
+    const end = pts[pts.length - 1];
+    if (picked.length < this.capacity && Math.hypot(end[0] - lastX, end[1] - lastY) > 1) {
+      picked.push({ x: end[0], y: end[1], feels: readAt(end[0], end[1]) });
+    }
+
+    const m = new THREE.Matrix4();
+    picked.forEach((p, i) => {
+      m.makeTranslation(p.x, p.y, 0);
+      this.mesh.setMatrixAt(i, m);
+      this.feels[i] = p.feels;
+    });
+    this.mesh.count = picked.length;
     this.mesh.instanceMatrix.needsUpdate = true;
+    (this.mesh.geometry.getAttribute("aFeels") as THREE.InstancedBufferAttribute).needsUpdate = true;
   }
 
   clear() {
@@ -252,28 +358,17 @@ export class RoutePins {
     return this.mesh.count;
   }
 
-  /**
-   * Hold the profile at a readable size as the camera pulls back.
-   *
-   * `metresPerPixel` comes from the map each frame. Radius and height take the same
-   * factor so the relative heights — which are the data — are untouched.
-   */
   setPixelScale(metresPerPixel: number) {
-    const raw = Math.max(1, metresPerPixel / PIN_REF_M_PER_PX);
     const u = this.material.uniforms;
-    u.uPinRadiusScale.value = Math.min(PIN_MAX_RADIUS_SCALE, raw);
-    // Height deliberately lags the width: a pin that grows as fast in both stops
-    // being a bar and becomes a tower, and a row of towers is a wall.
-    u.uPinHeightScale.value = Math.min(PIN_MAX_HEIGHT_SCALE, Math.sqrt(raw));
-
-    // Thin the pins out so their on-screen spacing stays roughly constant.
-    const want = Math.max(
-      1, Math.round((PIN_TARGET_PX_GAP * metresPerPixel) / PIN_SPACING_M),
+    // Stem still scales like the rest of the scene, so it stays a believable object
+    // standing on the street.
+    u.uScale.value = Math.min(MAX_SCALE, Math.max(1, metresPerPixel / REF_M_PER_PX));
+    // Plaque holds its size on screen: half-extent in metres = half-extent in pixels
+    // times the current metres-per-pixel.
+    (u.uHeadM.value as THREE.Vector2).set(
+      (HEAD_PX_W / 2) * metresPerPixel,
+      (HEAD_PX_H / 2) * metresPerPixel,
     );
-    if (want !== this.stride) {
-      this.stride = want;
-      this.upload();
-    }
   }
 
   setSun(dir: THREE.Vector3, intensity: number, color: THREE.Color) {
@@ -285,6 +380,54 @@ export class RoutePins {
 
   dispose() {
     this.mesh.geometry.dispose();
+    (this.material.uniforms.uLabels.value as THREE.Texture).dispose();
     this.material.dispose();
   }
+}
+
+/** Stem + plaque as one non-indexed geometry, tagged per vertex by `aPart`. */
+function buildMarkerGeometry(): THREE.InstancedBufferGeometry {
+  const stem = new THREE.CylinderGeometry(0.55, 1, 1, 7, 1, false);
+  stem.rotateX(Math.PI / 2);   // three's cylinder is Y-up; the twin is Z-up
+  stem.translate(0, 0, 0.5);   // base at the origin rather than straddling it
+  const s = stem.toNonIndexed();
+
+  const sp = s.getAttribute("position") as THREE.BufferAttribute;
+  const sn = s.getAttribute("normal") as THREE.BufferAttribute;
+  const stemCount = sp.count;
+
+  // plaque: two triangles spanning -1..1, positioned entirely in view space
+  const quad = [-1, -1, 1, -1, 1, 1, -1, -1, 1, 1, -1, 1];
+  const quadCount = 6;
+
+  const total = stemCount + quadCount;
+  const pos = new Float32Array(total * 3);
+  const nrm = new Float32Array(total * 3);
+  const part = new Float32Array(total);
+
+  for (let i = 0; i < stemCount; i++) {
+    pos[i * 3] = sp.getX(i);
+    pos[i * 3 + 1] = sp.getY(i);
+    pos[i * 3 + 2] = sp.getZ(i);
+    nrm[i * 3] = sn.getX(i);
+    nrm[i * 3 + 1] = sn.getY(i);
+    nrm[i * 3 + 2] = sn.getZ(i);
+    part[i] = 0;
+  }
+  for (let i = 0; i < quadCount; i++) {
+    const k = stemCount + i;
+    pos[k * 3] = quad[i * 2];
+    pos[k * 3 + 1] = quad[i * 2 + 1];
+    pos[k * 3 + 2] = 0;
+    nrm[k * 3 + 2] = 1;
+    part[k] = 1;
+  }
+  stem.dispose();
+  s.dispose();
+
+  const geo = new THREE.InstancedBufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
+  geo.setAttribute("aPart", new THREE.BufferAttribute(part, 1));
+  return geo;
 }
