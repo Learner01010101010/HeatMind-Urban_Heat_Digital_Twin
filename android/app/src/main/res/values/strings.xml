@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">HeatMind</string>
+    <string name="loading">Connecting to the heat twin…</string>
+    <string name="error_title">Can\'t reach HeatMind</string>
+    <!-- Names the URL it tried, because the commonest cause is the dev server
+         being unreachable from the device rather than anything being broken. -->
+    <string name="error_detail">Tried %1$s\n\n%2$s</string>
+    <string name="retry">Try again</string>
+</resources>
