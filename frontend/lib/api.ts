@@ -100,7 +100,12 @@ export interface RouteMetrics {
   distance_m: number;
   heat_dose: number;
   minutes_danger: number;
+  /** Minutes out of direct sun, as the traveller experiences it. */
   pct_shaded: number;
+  /** The street's own shade, before any vehicle shielding. */
+  pct_shaded_street: number;
+  /** True when the mode shields the traveller, so pct_shaded is about the vehicle. */
+  shielded: boolean;
   peak_feels_c: number;
   mean_feels_c: number;
   pct_asphalt: number;
@@ -241,7 +246,10 @@ export interface CompareResult {
   conditions: Conditions;
   mode: TravelMode;
   mode_label: string;
+  /** Speed of the chosen mode. For bus this is the bus, not the walk beside it. */
   speed_kmh: number;
+  /** Pace of the street routes shown alongside — a walk when the mode is bus. */
+  street_speed_kmh: number;
   mode_note: string;
   transit: TransitBlock | null;
   recommended_id: string;

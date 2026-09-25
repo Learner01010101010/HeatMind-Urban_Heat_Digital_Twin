@@ -272,7 +272,12 @@ class RoutePlanner:
         result = {
             "compare_id": cid,
             "persona": persona, "persona_label": P["label"], "scenario": scenario,
-            "mode": M.key, "mode_label": M.label, "speed_kmh": round(speed * 3.6, 1),
+            "mode": M.key, "mode_label": M.label,
+            # The mode the user picked, not the pace of the street alternatives shown
+            # beside it. For bus those alternatives are walks, and reporting 4.9 km/h
+            # under the label "Bus" reads as a claim about the bus.
+            "speed_kmh": round(modes_mod.speed_ms(M, P, congestion=self._congestion(f0)) * 3.6, 1),
+            "street_speed_kmh": round(speed * 3.6, 1),
             "mode_note": M.note,
             "depart_at": depart.isoformat(), "temp_delta_c": temp_delta,
             "offsets_min": TIMELINE_OFFSETS,

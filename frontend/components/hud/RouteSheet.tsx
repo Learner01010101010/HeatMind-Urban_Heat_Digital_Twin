@@ -19,6 +19,13 @@ function metrics(r: Route, fastest: Route, timeMin: number) {
   if (r.transit) {
     return { shade: r.metrics.pct_shaded, score: r.heat_risk_score, red: 0, water: 0 };
   }
+  // For a shielded mode the comparison that means anything between routes is the
+  // street's shade: the occupant's own figure is ~100% on every one of them, so it
+  // separates nothing and reads as a claim about the road.
+  if (r.metrics.shielded) {
+    const s0 = atTime(r.forecast.map((f) => f.score), timeMin);
+    return { shade: r.metrics.pct_shaded_street, score: s0, red: 0, water: 0 };
+  }
   const shade = atTime(r.forecast.map((f) => f.pct_shaded), timeMin);
   const score = atTime(r.forecast.map((f) => f.score), timeMin);
   const sun = r.duration_min * (1 - shade / 100);

@@ -12,6 +12,11 @@ export default function HeatProfileChart({ route, timeMin, units }: { route: Rou
   const pad = { l: 28, r: 6, t: 8, b: 20 };
   const segs = route.segments;
   const total = route.distance_m || 1;
+  // No segments, no profile. A transit trip has none — its legs run at three
+  // different speeds and one of them is standing still, so "feels-like per metre"
+  // is not a curve that exists. Without this guard the empty spread makes
+  // Math.min() Infinity, and the whole SVG renders as NaN coordinates.
+  if (!segs.length) return null;
   const vals = segs.map((s) => atTime(s.feels, timeMin));
   const all = segs.flatMap((s) => s.feels);
   const lo = Math.floor(Math.min(...all) - 1);

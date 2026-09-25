@@ -108,6 +108,12 @@ def score_route(*, persona: str, seconds: np.ndarray, lengths: np.ndarray, feels
     eff_exposure = exposure * mode_exposure
     shaded = (eff_exposure < 0.35) if day > 0 else np.ones_like(exposure, dtype=bool)
     pct_shaded = float((mins * shaded).sum() / max(dur, 1e-6))
+    # The street's own shade, before the vehicle is accounted for. Without this a car
+    # route reports "100% shaded" -- true of the occupant, false of the road, and
+    # read as the latter by anyone looking at a shade figure. Both are reported and
+    # the UI says which is which.
+    street_shaded = (exposure < 0.35) if day > 0 else np.ones_like(exposure, dtype=bool)
+    pct_shaded_street = float((mins * street_shaded).sum() / max(dur, 1e-6))
     peak = float(np.percentile(f_p, 95))
     mean_f = float((mins * f_p).sum() / max(dur, 1e-6))
     heat_mod = float(np.clip((mean_f - 30) / 16, 0, 1))
@@ -139,7 +145,10 @@ def score_route(*, persona: str, seconds: np.ndarray, lengths: np.ndarray, feels
     metrics = {
         "duration_min": round(dur, 1), "distance_m": round(float(lengths.sum())),
         "heat_dose": round(dose, 1), "minutes_danger": round(minutes_danger, 1),
-        "pct_shaded": round(pct_shaded * 100, 1), "peak_feels_c": round(peak - P["vulnerability_shift_c"], 1),
+        "pct_shaded": round(pct_shaded * 100, 1),
+        "pct_shaded_street": round(pct_shaded_street * 100, 1),
+        "shielded": mode_exposure < 0.5,
+        "peak_feels_c": round(peak - P["vulnerability_shift_c"], 1),
         "mean_feels_c": round(mean_f - P["vulnerability_shift_c"], 1),
         "pct_asphalt": round(float((mins * asphalt).sum() / max(dur, 1e-6)) * 100, 1),
         "max_gap_min": round(max_gap_min, 1), "surface_excess_c": round(surf, 1),
