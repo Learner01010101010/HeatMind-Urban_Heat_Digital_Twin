@@ -14,6 +14,7 @@ import { ProfileButton, ProfilePanel } from "@/components/hud/Profile";
 import RouteSheet from "@/components/hud/RouteSheet";
 import SearchPill from "@/components/hud/SearchPill";
 import SimulateButton from "@/components/hud/SimulateButton";
+import SunChip from "@/components/hud/SunChip";
 import Timeline from "@/components/hud/Timeline";
 import Drawer from "@/components/ui/Drawer";
 import { runCompare } from "@/lib/actions";
@@ -137,7 +138,10 @@ export default function Home() {
       {/* ── bottom ── */}
       {wide ? (
         <div className="absolute bottom-0 inset-x-0 z-30 p-5 pointer-events-none flex items-end gap-3">
-          <div className="pointer-events-auto shrink-0">
+          <div className="pointer-events-auto shrink-0 flex flex-col items-start gap-2">
+            {/* The sun readout sits with the timeline: scrubbing moves both the sun in
+                the 3D sky and this number, which is what ties the two together. */}
+            <SunChip />
             <InsightChip />
           </div>
           <div className="pointer-events-auto flex-1 min-w-0 max-w-[600px] mx-auto">

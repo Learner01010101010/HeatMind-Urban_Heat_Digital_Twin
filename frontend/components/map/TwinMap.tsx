@@ -12,6 +12,7 @@ import { POI_STYLE } from "@/lib/poiStyle";
 import { solarIntensity, solarPosition } from "@/lib/solar";
 import { atTime, keyframes, SCENARIO, TIMELINE, useMap, usePrefs } from "@/lib/store";
 import { HeatTwinLayer } from "./three/HeatTwinLayer";
+import { HeatTwinOverlayLayer, OVERLAY_LAYER_ID } from "./three/overlayLayer";
 import { loadFields } from "./three/fields";
 import type { SignalRecord } from "./three/signals";
 import type { TreeRecord } from "./three/trees";
@@ -301,6 +302,10 @@ export default function TwinMap() {
         );
         // above the basemap, below the labels and every vector overlay
         map.addLayer(layer, "labels");
+        // ...and the twin's annotations above all of them. The route line is drawn
+        // after the twin by design, which also put it over the temperature plaques
+        // describing that very route; this second pass puts them back on top.
+        map.addLayer(new HeatTwinOverlayLayer(layer));
         layerRef.current = layer;
         added = layer;
 
@@ -323,6 +328,9 @@ export default function TwinMap() {
     return () => {
       dead = true;
       const m = mapRef.current;
+      // The overlay borrows the twin's renderer, so it has to go first: left behind,
+      // it would keep asking a disposed renderer for another pass.
+      if (m && m.getLayer(OVERLAY_LAYER_ID)) m.removeLayer(OVERLAY_LAYER_ID);
       if (added && m && m.getLayer(added.id)) m.removeLayer(added.id);
       layerRef.current = null;
     };
