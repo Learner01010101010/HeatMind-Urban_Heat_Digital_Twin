@@ -4,6 +4,7 @@ import * as THREE from "three";
 import type { BuildingProps, Typology } from "@/lib/api";
 import type { TwinFields } from "./fields";
 import { makeLutTexture } from "./fields";
+import { LIFT_GLSL, type LiftUniforms } from "./lift";
 import { REVEAL_GLSL } from "./reveal";
 
 /**
@@ -82,6 +83,8 @@ varying vec3 vNormal;
 varying vec2 vGround;       // local metres, for sampling the field textures
 
 uniform float uGrow;
+uniform vec2 uExtent;
+${LIFT_GLSL}
 
 void main() {
   vFacade = vec2(aFacade.x, aFacade.y * uGrow);
@@ -94,6 +97,10 @@ void main() {
   vec3 p = position;
   p.z *= uGrow;
   vGround = p.xy;
+  // Ride the vulnerability terrain. Sampled at the footprint rather than per
+  // vertex so a building rises as one rigid block instead of shearing across a
+  // slope, which is what a building standing on sloping ground actually does.
+  p.z += liftAt(clamp(vGround / uExtent, 0.0, 1.0));
   gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
 }`;
 
@@ -295,6 +302,7 @@ export class Buildings {
     fields: TwinFields,
     exposure: THREE.Texture,
     reveal: THREE.Texture,
+    lift: LiftUniforms,
   ) {
     // Two passes, into preallocated typed arrays.
     //
@@ -418,6 +426,7 @@ export class Buildings {
         uThermalMass: { value: THERMAL_MASS },
         uReveal: { value: reveal },
         uRevealOn: { value: 0 },
+        ...lift,
       },
       side: THREE.DoubleSide,
     });

@@ -2,6 +2,7 @@
 
 import * as THREE from "three";
 import type { TwinFields } from "./fields";
+import { LIFT_GLSL, type LiftUniforms } from "./lift";
 import { REVEAL_GLSL } from "./reveal";
 
 /**
@@ -32,6 +33,8 @@ varying float vSeed;
 varying float vPlanted;
 
 uniform float uPlantGrow;
+uniform vec2 uExtent;
+${LIFT_GLSL}
 
 void main() {
   vDensity = aDensity;
@@ -45,6 +48,8 @@ void main() {
 
   vec4 world = instanceMatrix * vec4(local, 1.0);
   vGround = world.xy;
+  // Stand on the vulnerability terrain with everything else.
+  world.z += liftAt(clamp(vGround / uExtent, 0.0, 1.0));
   vNormal = normalize(mat3(instanceMatrix) * normal);
   gl_Position = projectionMatrix * modelViewMatrix * world;
 }`;
@@ -122,7 +127,8 @@ export class Trees {
   private readonly planted: Float32Array;
   private plantedCount = 0;
 
-  constructor(records: TreeRecord[], fields: TwinFields, exposure: THREE.Texture, reveal: THREE.Texture) {
+  constructor(records: TreeRecord[], fields: TwinFields, exposure: THREE.Texture,
+              reveal: THREE.Texture, lift: LiftUniforms) {
     const cap = records.length + SLACK;
     this.baseCount = records.length;
 
@@ -150,6 +156,7 @@ export class Trees {
         uPlantGrow: { value: 1 },
         uReveal: { value: reveal },
         uRevealOn: { value: 0 },
+        ...lift,
       },
     });
     this.trunkMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.16, 0.13, 0.1) });
@@ -168,6 +175,19 @@ export class Trees {
 
     records.forEach((t, i) => this.write(i, t, fields, 0));
     this.setCount(records.length);
+  }
+
+  /**
+   * Hide the trunks while the vulnerability terrain is raised.
+   *
+   * Canopies are instanced through a custom shader and ride the relief with
+   * everything else; trunks are a plain material with no vertex stage to patch, so
+   * they would stay pinned at z = 0 and leave the crowns floating. They are 2-6 m
+   * stubs that read as nothing against 26 m of relief, and the canopy is what
+   * carries the meaning here, so dropping them costs the picture nothing.
+   */
+  setLifted(on: boolean) {
+    this.trunks.visible = !on;
   }
 
   private write(i: number, t: TreeRecord, fields: TwinFields, planted: number) {

@@ -103,6 +103,23 @@ export class GroundHeat {
   private keyA = "";
   private keyB = "";
 
+  /** The live heat keyframes, so the terrain lift can read the same two textures
+   *  this plane is colouring from. Shared by reference on purpose: a second copy
+   *  could fall a frame behind and tear the relief away from the colour on it. */
+  get heatTextures(): { a: THREE.DataTexture; b: THREE.DataTexture } {
+    return { a: this.texA, b: this.texB };
+  }
+
+  /** Current keyframe blend state, mirrored onto the lift uniforms. */
+  get blendState(): { blend: number; hasB: number } {
+    const u = this.material.uniforms;
+    return { blend: u.uBlend.value as number, hasB: u.uHasB.value as number };
+  }
+
+  setVisible(on: boolean) {
+    this.mesh.visible = on;
+  }
+
   constructor(private readonly fields: TwinFields, exposure: THREE.Texture, reveal: THREE.Texture) {
     this.texA = makeFrameTexture(fields.cols, fields.rows);
     this.texB = makeFrameTexture(fields.cols, fields.rows);

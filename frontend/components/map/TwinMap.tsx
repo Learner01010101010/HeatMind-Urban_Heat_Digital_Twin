@@ -449,7 +449,12 @@ export default function TwinMap() {
   useEffect(() => {
     const map = ready;
     if (!ready || !map) return;
-    map.setLayoutProperty("equity", "visibility", equityOn ? "visible" : "none");
+    // In the 3D twin the index is rendered as lit relief on the GPU instead, at the
+    // full 10 m grid. Showing the flat polygon surface underneath it as well would
+    // double-tint the same number and z-fight with the terrain it sits on.
+    const flat = equityOn && mode !== "twin";
+    map.setLayoutProperty("equity", "visibility", flat ? "visible" : "none");
+    layerRef.current?.setEquity(equityOn);
     if (!equityOn || !nearest || !base) return;
     const key = `${scenario}|${nearest.time}|${tempDelta}`;
     const ctrl = { dead: false };
@@ -465,7 +470,7 @@ export default function TwinMap() {
     return () => {
       ctrl.dead = true;
     };
-  }, [ready, equityOn, nearest, scenario, tempDelta, base]);
+  }, [ready, equityOn, mode, nearest, scenario, tempDelta, base, layerEpoch]);
 
   // ───────── crowdsourced hydration/rest points (SDG 6) ─────────
   useEffect(() => {
