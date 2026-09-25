@@ -22,7 +22,7 @@ import { REVEAL_GLSL } from "./reveal";
 // Ribbon z, just above the basemap and below GroundHeat's 0.05.
 const ROAD_Z = 0.02;
 /** Narrowest a road may be drawn, in screen pixels, however far the camera is. */
-const MIN_ROAD_PX = 1.7;
+const MIN_ROAD_PX = 2.8;
 /** ...but never widened past this in world metres, or the city becomes a grey mat
  *  and the class tones stop showing any hierarchy. */
 const MAX_MIN_WIDTH_M = 13.0;
@@ -51,7 +51,14 @@ const CLASS_TONE = [
   0.17, 0.26, 0.19, // cycleway — moss green
   0.29, 0.285, 0.275, // junction face — mid-grey, between tertiary and residential
 ];
+// A dashed centre line separates opposing traffic, so it belongs on a road that has
+// opposing traffic: classified streets, not a 3 m service lane or a footpath.
 const HAS_CENTRELINE = [1, 1, 1, 1, 0, 0, 0, 0, 0, 0];
+// Edge lines mark the usable carriageway and are what actually makes a road read as
+// a road rather than a grey ribbon, so they go on everything a car drives down --
+// residential streets included. Not on footways, tracks, cycleways or the junction
+// face, none of which carry lane markings in the real world either.
+const HAS_EDGELINE = [1, 1, 1, 1, 1, 0, 0, 0, 0, 0];
 /** Tone slot for the disc that fills a junction. */
 const JUNCTION_CLASS = 9;
 const TONE_SLOTS = 10;
@@ -69,6 +76,7 @@ varying float vAlong;
 varying float vAcross;
 varying float vClass;
 varying float vWidth;
+varying float vTrueWidth;
 varying vec2 vGround;
 
 uniform vec2 uExtent;
@@ -85,6 +93,9 @@ void main() {
   // kerb offset grows.
   float wEff = max(aWidth, uMinWidthM);
   vWidth = wEff;
+  // The drawn width is inflated at low zoom so minor streets stay visible; the lane
+  // count has to come from the real one or a 3 m alley picks up six lanes of markings.
+  vTrueWidth = aWidth;
 
   vec3 p = position;
   p.xy += aOffset * (wEff * 0.5);
@@ -100,6 +111,7 @@ varying float vAlong;
 varying float vAcross;
 varying float vClass;
 varying float vWidth;
+varying float vTrueWidth;
 varying vec2 vGround;
 
 uniform sampler2D uExposure;
@@ -109,21 +121,68 @@ uniform vec3 uSunColor;
 uniform float uSunIntensity;
 uniform vec3 uTone[10];
 uniform float uCentreline[10];
+uniform float uEdgeline[10];
+uniform float uMetresPerPx;
 ${REVEAL_GLSL}
+
+float hash(vec2 p) { return fract(sin(dot(p, vec2(37.1, 61.7))) * 24634.6345); }
 
 void main() {
   int ci = int(vClass + 0.5);
   vec3 col = uTone[ci];
 
   float a = abs(vAcross);
+  float halfW = max(vWidth, 0.5) * 0.5;
+  float d = a * halfW;                     // metres from the centreline
 
-  // kerb: darken the outer eighth so the edge of the carriageway is legible
-  col *= 1.0 - 0.35 * smoothstep(0.78, 1.0, a);
+  // Asphalt, with a little aggregate in it. A perfectly flat tone reads as a drawn
+  // line; the grain is what makes it read as a surface the line is painted on.
+  col *= 0.93 + 0.14 * hash(floor(vGround * 1.9));
 
-  // painted centre line, dashed, on classified roads only
-  float dash = step(0.45, fract(vAlong / 9.0));
-  float centre = (1.0 - smoothstep(0.0, 1.6 / max(vWidth, 2.0), a)) * dash * uCentreline[ci];
-  col = mix(col, vec3(0.88, 0.82, 0.52), centre * 0.85);
+  // kerb: darken the outer edge so the carriageway has a boundary
+  col *= 1.0 - 0.38 * smoothstep(0.80, 1.0, a);
+
+  // --- road markings ---------------------------------------------------------
+  // Half-width of a painted stripe. Real lane markings are 100-150 mm; the old
+  // centre line was 1.6 m wide, so on a 6 m street a quarter of the carriageway was
+  // paint and the road read as a white line rather than as a road with a line on it.
+  // Floored at half a pixel so a correct 0.12 m stripe does not simply alias away
+  // when the camera pulls back -- but never more than a sliver of the carriageway
+  // either, because that floor alone would paint a 5.5 m stripe at the zoom that
+  // fits Narhe to Swargate and turn every road solid white. That is the same
+  // failure this is here to fix, just at the other end of the zoom range.
+  float paint = min(max(0.07, 0.55 * uMetresPerPx), halfW * 0.15);
+  float stripe0 = paint * 0.6;
+  float stripe1 = paint * 1.5;
+
+  // 3 m painted, 6 m gap -- the standard broken-line cycle.
+  float dashOn = step(fract(vAlong / 9.0), 0.34);
+
+  // Edge lines: continuous, set in from each kerb by a fraction of the width so a
+  // narrow street does not end up with both lines meeting in the middle.
+  float inset = min(0.55, halfW * 0.16);
+  float edge = 1.0 - smoothstep(stripe0, stripe1, abs(halfW - inset - d));
+
+  // Centre line: dashed, between opposing flows.
+  float centre = (1.0 - smoothstep(stripe0, stripe1, d)) * dashOn;
+
+  // Lane dividers, only where the real carriageway is wide enough to have lanes.
+  float lanes = floor(vTrueWidth / 3.25 + 0.5);
+  float lane = 0.0;
+  if (lanes >= 4.0) {
+    float laneW = halfW * 2.0 / lanes;
+    float m = mod(d, laneW);
+    float off = min(m, laneW - m);
+    lane = (1.0 - smoothstep(stripe0, stripe1, off)) * dashOn
+         * step(laneW * 0.5, d)                      // not over the centre line
+         * step(d, halfW - inset - stripe1 * 2.0);   // not over the edge line
+  }
+
+  float mark = clamp(centre * uCentreline[ci]
+                   + (edge + lane) * uEdgeline[ci], 0.0, 1.0);
+  // Worn white, not pure white: fresh paint at full value blows out against asphalt
+  // this dark and the markings stop reading as part of the surface.
+  col = mix(col, vec3(0.86, 0.85, 0.80), mark * 0.82);
 
   // lighting from the same field the ground and buildings use
   vec2 uv = clamp(vGround / uExtent, 0.0, 1.0);
@@ -325,6 +384,8 @@ export class Roads {
         uSunIntensity: { value: 1 },
         uTone: { value: tones },
         uCentreline: { value: HAS_CENTRELINE },
+        uEdgeline: { value: HAS_EDGELINE },
+        uMetresPerPx: { value: 0.3 },
         uReveal: { value: reveal },
         uRevealOn: { value: 0 },
         uMinWidthM: { value: 0 },
@@ -348,6 +409,10 @@ export class Roads {
     this.material.uniforms.uMinWidthM.value = Math.min(
       MAX_MIN_WIDTH_M, MIN_ROAD_PX * metresPerPixel,
     );
+    // The markings need this too: a 120 mm stripe is a hundredth of a pixel from
+    // across the city, so the shader widens it to stay visible rather than letting
+    // it flicker in and out between frames.
+    this.material.uniforms.uMetresPerPx.value = metresPerPixel;
   }
 
   setSun(intensity: number, color: THREE.Color) {
