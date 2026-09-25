@@ -291,8 +291,17 @@ export interface ZoneData {
   buildings: GeoJSON.FeatureCollection<GeoJSON.Polygon, BuildingProps>;
   surfaces: GeoJSON.FeatureCollection;
   roads: GeoJSON.FeatureCollection<GeoJSON.LineString, RoadProps>;
+  /** [lon, lat, radius_m] per connected road node — see Zone.junctions(). */
+  junctions: [number, number, number][];
+  signals: GeoJSON.FeatureCollection<GeoJSON.Point, SignalProps>;
   trees: GeoJSON.FeatureCollection;
   places: Place[];
+}
+
+export interface SignalProps {
+  kind: "traffic_signals" | "crossing" | "stop" | "give_way" | "mini_roundabout";
+  crossing: string;
+  name: string;
 }
 
 export interface PointSample {

@@ -13,6 +13,7 @@ import { solarIntensity, solarPosition } from "@/lib/solar";
 import { atTime, keyframes, SCENARIO, TIMELINE, useMap, usePrefs } from "@/lib/store";
 import { HeatTwinLayer } from "./three/HeatTwinLayer";
 import { loadFields } from "./three/fields";
+import type { SignalRecord } from "./three/signals";
 import type { TreeRecord } from "./three/trees";
 
 // How much of the twin is built around the user's own starting point. Generous
@@ -248,11 +249,17 @@ export default function TwinMap() {
           const pr = f.properties as { r: number; d: number } | null;
           return { lat: c[1], lon: c[0], radiusM: pr?.r ?? 4, density: pr?.d ?? 0.7 };
         });
+        const signals: SignalRecord[] = (zone.data!.signals?.features ?? []).map((f) => {
+          const c = (f.geometry as GeoJSON.Point).coordinates;
+          return { lat: c[1], lon: c[0], kind: f.properties.kind, crossing: f.properties.crossing };
+        });
         const layer = new HeatTwinLayer(
           fields,
           zone.data!.buildings.features,
           trees,
           zone.data!.roads.features,
+          zone.data!.junctions ?? [],
+          signals,
         );
         // above the basemap, below the labels and every vector overlay
         map.addLayer(layer, "labels");

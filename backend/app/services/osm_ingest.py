@@ -47,6 +47,77 @@ def _norm_surface(tag: str | None, default: str) -> str:
     return SURFACE_NORMALISE.get(tag or "", SURFACE_NORMALISE.get(default, default))
 
 
+# Carriageway geometry. A marked lane in urban India runs about 3.25 m, and a
+# classified road carries a shoulder or kerb strip either side.
+LANE_M = 3.25
+SHOULDER_M = 0.75
+CLASSIFIED = frozenset({"trunk", "primary", "secondary", "tertiary", "unclassified",
+                        "trunk_link", "primary_link", "tertiary_link"})
+
+
+def _float(v: object) -> float | None:
+    """First number in an OSM value, so `7`, `7.5` and `7 m` all parse."""
+    try:
+        return float(str(v).strip().split()[0].replace(",", "."))
+    except (ValueError, IndexError, AttributeError):
+        return None
+
+
+def _road_width(t: dict, hw: str, default: float) -> tuple[float, str]:
+    """Carriageway width in metres, and where the number came from.
+
+    Only 2 ways in the whole zone carry a `width` tag and 321 carry `lanes`, so most
+    roads still fall back to the class default -- but a six-lane stretch of the
+    Katraj-Dehu bypass is 20 m of asphalt, not the 18 m its class implies, and a
+    one-lane service road is 3 m, not 4. Where OSM counted the lanes, the lanes are
+    what gets drawn.
+    """
+    w = _float(t.get("width")) or _float(t.get("carriageway_width"))
+    if w and 0.5 <= w <= 60:
+        return w, "width_tag"
+    lanes = _float(t.get("lanes"))
+    if lanes and 1 <= lanes <= 12:
+        shoulder = 2 * SHOULDER_M if hw in CLASSIFIED else 0.0
+        return round(lanes * LANE_M + shoulder, 1), "lanes_tag"
+    return default, "class_default"
+
+
+BUILDINGS_FILE = OSM_RAW.parent / "buildings.json"
+CANOPY_FILE = OSM_RAW.parent / "canopy.json"
+
+
+def _load_measured_buildings() -> list[dict] | None:
+    """Footprints and heights measured from satellite, if scripts/fetch_buildings.py has run.
+
+    Returns None when the file is absent so a fresh checkout still builds a zone from
+    OSM alone -- degraded, and the meta counts say so, but not broken.
+    """
+    if not BUILDINGS_FILE.exists():
+        return None
+    d = json.loads(BUILDINGS_FILE.read_text(encoding="utf8"))
+    out = []
+    for i, b in enumerate(d["buildings"]):
+        out.append({
+            "id": f"b{i}", "osm_id": b.get("oid", ""), "name": b.get("name", ""),
+            "kind": b.get("kind") or "yes", "height_m": b["height_m"],
+            "height_source": b.get("height_source", "satellite"),
+            "area_m2": b.get("area_m2", 0), "ring": b["ring"],
+        })
+    return out
+
+
+def _load_canopy() -> dict | None:
+    """Trees and land cover measured from satellite, if scripts/fetch_canopy.py has run."""
+    if not CANOPY_FILE.exists():
+        return None
+    d = json.loads(CANOPY_FILE.read_text(encoding="utf8"))
+    # Widest crowns first. The renderer draws a budget of instances rather than all
+    # 102,877 at once, and taking them off the front of a sorted list means the ones
+    # it drops are the smallest -- a scrap of hedge rather than a park's tree line.
+    trees = sorted(d["trees"], key=lambda t: -t["radius_m"])
+    return {"trees": trees, "landcover_b64": d.get("landcover_b64", "")}
+
+
 def _levels(tags: dict) -> float | None:
     for key in ("height",):
         if key in tags:
@@ -85,9 +156,14 @@ def build_zone() -> dict[str, Any]:
     rng = random.Random(42)
 
     roads: list[dict] = []
-    buildings: list[dict] = []
+    # Measured footprints if the build step has run, otherwise the OSM ones so the
+    # twin still builds from a bare checkout.
+    measured = _load_measured_buildings()
+    buildings: list[dict] = measured or []
+    osm_buildings: list[dict] | None = None if measured else []
     surfaces: list[dict] = []
     trees: list[dict] = []
+    signals: list[dict] = []
     pois: list[dict] = []
     places: list[dict] = []
     seen_places: set[str] = set()
@@ -117,6 +193,7 @@ def build_zone() -> dict[str, Any]:
             if t.get("access") in ("no",) or t.get("foot") == "no":
                 continue
             width, default_surface = WALK_HIGHWAYS[hw]
+            road_w, road_w_src = _road_width(t, hw, width)
             # Clip to zone: split the way into runs of in-bbox nodes.
             runs, cur = [], []
             for c in coords:
@@ -135,7 +212,8 @@ def build_zone() -> dict[str, Any]:
                     "name": t.get("name") or t.get("ref") or "",
                     "highway": hw,
                     "surface": _norm_surface(t.get("surface"), default_surface),
-                    "width_m": float(t.get("width", width)) if str(t.get("width", "")).replace(".", "", 1).isdigit() else width,
+                    "width_m": road_w,
+                    "width_source": road_w_src,
                     "walkable": True,
                     "bikeable": hw not in ("steps", "footway") or t.get("bicycle") in ("yes", "designated"),
                     "nodes": [[n, round(la, 7), round(lo, 7)] for n, la, lo in run],
@@ -154,17 +232,20 @@ def build_zone() -> dict[str, Any]:
         area = geo.ring_area_m2(ring_xy)
 
         if "building" in t:
+            # Geometry and height come from the measured set (see below); OSM is
+            # still the only source of a building's *name*, so it is read for that.
             kind = t.get("building", "yes")
-            h = _levels(t)
-            src = "osm"
-            if h is None:
-                h = _estimate_height(kind, area, rng)
-                src = "estimated"
-            buildings.append({
-                "id": f"b{len(buildings)}", "osm_id": e["id"], "name": t.get("name", ""), "kind": kind,
-                "height_m": h, "height_source": src, "area_m2": round(area),
-                "ring": [[round(a, 7), round(b, 7)] for a, b in ring],
-            })
+            if osm_buildings is not None:
+                h = _levels(t)
+                src = "osm"
+                if h is None:
+                    h = _estimate_height(kind, area, rng)
+                    src = "estimated"
+                osm_buildings.append({
+                    "id": f"b{len(osm_buildings)}", "osm_id": e["id"], "name": t.get("name", ""),
+                    "kind": kind, "height_m": h, "height_source": src, "area_m2": round(area),
+                    "ring": [[round(a, 7), round(b, 7)] for a, b in ring],
+                })
             if t.get("name"):
                 add_place(t["name"], t.get("amenity") or kind, cla, clo)
             if t.get("amenity"):
@@ -206,6 +287,11 @@ def build_zone() -> dict[str, Any]:
             continue
         if t.get("natural") == "tree":
             trees.append({"lat": lat, "lon": lon, "radius_m": 5.0, "density": 0.8, "source": "osm"})
+        hw_node = t.get("highway")
+        if hw_node in _SIGNAL_KINDS:
+            signals.append({"lat": round(lat, 7), "lon": round(lon, 7), "kind": hw_node,
+                            "crossing": t.get("crossing", ""),
+                            "name": t.get("name", "")})
         if t.get("amenity") or t.get("shop"):
             _amenity_poi(pois, t, lat, lon)
             if t.get("name") and t.get("amenity"):
@@ -218,7 +304,20 @@ def build_zone() -> dict[str, Any]:
             add_place(t["name"], f"place:{t['place']}", lat, lon,
                       featured=t["place"] in _FEATURED_PLACE_KINDS)
 
-    _synthesise_canopy(trees, roads, surfaces, buildings, rng)
+    if osm_buildings is not None:
+        buildings = osm_buildings
+
+    junctions = _junctions(roads)
+
+    # Canopy is measured, never invented. _synthesise_canopy() used to scatter
+    # 33,329 trees down streets a random number called "tree-lined"; those trees
+    # shaded the model's streets and none of them existed. Now the only trees are
+    # the ones OSM maps individually plus the ones a 1 m canopy-height raster sees.
+    landcover_b64 = ""
+    canopy = _load_canopy()
+    if canopy:
+        trees.extend(canopy["trees"])
+        landcover_b64 = canopy.get("landcover_b64", "")
     _seed_pois(pois, roads, surfaces, places, rng)
 
     for i, p in enumerate(pois):
@@ -240,19 +339,66 @@ def build_zone() -> dict[str, Any]:
             "osm_timestamp": raw.get("osm3s", {}).get("timestamp_osm_base"),
             "counts": {
                 "roads": len(roads), "buildings": len(buildings),
-                "buildings_height_osm": sum(b["height_source"] == "osm" for b in buildings),
-                "surfaces": len(surfaces), "trees_osm": sum(t["source"] == "osm" for t in trees),
-                "trees_estimated": sum(t["source"] != "osm" for t in trees),
+                "buildings_height_tagged": sum(b.get("height_source") == "tagged" for b in buildings),
+                "surfaces": len(surfaces),
+                "trees_osm": sum(t["source"] == "osm" for t in trees),
+                "trees_measured": sum(t["source"] == "chm" for t in trees),
+                "trees_estimated": sum(t["source"] not in ("osm", "chm") for t in trees),
+                "buildings_height_measured": sum(
+                    b.get("height_source") in ("satellite", "satellite_low", "tagged")
+                    for b in buildings),
                 "pois_osm": sum(p["source"] == "osm" for p in pois),
                 "pois_seeded": sum(p["source"] != "osm" for p in pois), "places": len(places),
+                "junctions": len(junctions), "signals": len(signals),
+                "roads_width_measured": sum(r["width_source"] != "class_default" for r in roads),
             },
         },
         "roads": roads, "buildings": buildings, "surfaces": surfaces,
+        "junctions": junctions, "signals": signals,
+        "landcover_b64": landcover_b64,
         "trees": [{**t, "lat": round(t["lat"], 7), "lon": round(t["lon"], 7)} for t in trees],
         "pois": pois, "places": places,
     }
     ZONE_FILE.write_text(json.dumps(zone, separators=(",", ":")), encoding="utf8")
     return zone
+
+
+# Highway nodes worth drawing. Signals and crossings change how a pedestrian
+# actually moves through a junction, which is the point of a walking router; the
+# rest are geometry hints that only matter for rendering the junction itself.
+_SIGNAL_KINDS = frozenset({"traffic_signals", "crossing", "stop", "give_way", "mini_roundabout"})
+
+
+def _junctions(roads: list[dict]) -> list[dict]:
+    """Nodes where the network actually connects, with the radius that fills them.
+
+    Roads are drawn as independent ribbons, one per OSM way. Two ways meeting at an
+    angle leave an unfilled wedge on the outside of the turn, and a narrow way
+    T-joining a wide one stops dead at the wide one's kerb -- so at every real
+    intersection the network came apart into loose ends. OSM splits ways at
+    intersections, so the shared node is exactly where that happens.
+
+    The radius is half the widest road at the node, which is the disc that covers
+    every incident carriageway; capped, because a 20 m trunk crossing would otherwise
+    paint a 10 m roundabout onto a plain signalised junction.
+    """
+    seen: dict[int, list[float]] = {}
+    for r in roads:
+        w = r["width_m"]
+        for nid, la, lo in r["nodes"]:
+            e = seen.get(nid)
+            if e is None:
+                seen[nid] = [la, lo, w, 1]
+            else:
+                e[2] = max(e[2], w)
+                e[3] += 1
+    out = []
+    for nid, (la, lo, w, n) in seen.items():
+        if n < 2:
+            continue
+        out.append({"lat": round(la, 7), "lon": round(lo, 7),
+                    "r_m": round(min(w, 22.0) / 2, 2)})
+    return out
 
 
 # place=* values worth surfacing as destinations. Smaller values (isolated_dwelling,
@@ -275,73 +421,6 @@ def _amenity_poi(pois: list, t: dict, lat: float, lon: float) -> None:
         return
     pois.append({"type": typ, "name": name, "lat": round(lat, 7), "lon": round(lon, 7), "source": "osm",
                  "detail": a or t.get("shop", "")})
-
-
-def _synthesise_canopy(trees, roads, surfaces, buildings, rng) -> None:
-    """Estimated canopy: street trees + campus/park perimeter + lake-edge vegetation."""
-    b_masks = []
-    for b in buildings:
-        xy = [geo.to_xy(*p) for p in b["ring"]]
-        xs = [p[0] for p in xy]
-        ys = [p[1] for p in xy]
-        b_masks.append((min(xs), min(ys), max(xs), max(ys)))
-
-    def clear(x, y):
-        for x0, y0, x1, y1 in b_masks:
-            if x0 - 2 <= x <= x1 + 2 and y0 - 2 <= y <= y1 + 2:
-                return False
-        return True
-
-    # Canopy character is assigned per street (OSM way): tree-lined avenues vs. bare roads,
-    # which is how real neighbourhoods look — and why parallel streets differ so much in heat.
-    avenue_p = {"residential": 0.45, "service": 0.55, "tertiary": 0.35, "unclassified": 0.4, "living_street": 0.6,
-                "footway": 0.7, "path": 0.6, "track": 0.45, "trunk": 0.05, "trunk_link": 0.05}
-    way_rng: dict[int, float] = {}
-    for r in roads:
-        wr = random.Random(r["osm_id"])
-        if r["osm_id"] not in way_rng:
-            way_rng[r["osm_id"]] = 0.85 if wr.random() < avenue_p.get(r["highway"], 0.3) else 0.1
-        p = way_rng[r["osm_id"]]
-        pts = [geo.to_xy(la, lo) for _, la, lo in r["nodes"]]
-        for (ax, ay), (bx, by) in zip(pts[:-1], pts[1:]):
-            L = math.hypot(bx - ax, by - ay)
-            if L < 1:
-                continue
-            nx, ny = -(by - ay) / L, (bx - ax) / L
-            steps = int(L // 12)
-            for k in range(steps + 1):
-                if rng.random() > p:
-                    continue
-                t = (k + rng.random() * 0.5) / max(steps, 1)
-                side = rng.choice((-1, 1))
-                off = r["width_m"] / 2 + rng.uniform(1.0, 3.0)
-                x = ax + (bx - ax) * min(t, 1) + nx * off * side
-                y = ay + (by - ay) * min(t, 1) + ny * off * side
-                if clear(x, y) and 0 < x < geo.WIDTH_M and 0 < y < geo.HEIGHT_M:
-                    la, lo = geo.to_latlon(x, y)
-                    trees.append({"lat": la, "lon": lo, "radius_m": round(rng.uniform(4.0, 7.0), 1),
-                                  "density": round(rng.uniform(0.7, 0.92), 2), "source": "estimated"})
-
-    for s in surfaces:
-        if s["kind"] not in ("campus", "park", "water", "woodland", "ground"):
-            continue
-        xy = [geo.to_xy(*p) for p in s["ring"]]
-        spacing = {"water": 9, "park": 10, "woodland": 8}.get(s["kind"], 14)
-        pr = {"water": 0.75, "park": 0.8, "woodland": 0.9, "campus": 0.6, "ground": 0.35}[s["kind"]]
-        for (ax, ay), (bx, by) in zip(xy, xy[1:] + xy[:1]):
-            L = math.hypot(bx - ax, by - ay)
-            for k in range(int(L // spacing) + 1):
-                if rng.random() > pr:
-                    continue
-                t = k * spacing / max(L, 1)
-                x, y = ax + (bx - ax) * t, ay + (by - ay) * t
-                # push slightly inside/outside for lake-edge vegetation
-                x += rng.uniform(-3, 3)
-                y += rng.uniform(-3, 3)
-                if clear(x, y) and 0 < x < geo.WIDTH_M and 0 < y < geo.HEIGHT_M:
-                    la, lo = geo.to_latlon(x, y)
-                    trees.append({"lat": la, "lon": lo, "radius_m": round(rng.uniform(4.5, 7.5), 1),
-                                  "density": round(rng.uniform(0.6, 0.9), 2), "source": "estimated"})
 
 
 def _seed_pois(pois, roads, surfaces, places, rng) -> None:

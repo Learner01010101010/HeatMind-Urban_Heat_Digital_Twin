@@ -49,8 +49,12 @@ const CLASS_TONE = [
   0.40, 0.37, 0.32, // footway — light paving, warm beige
   0.28, 0.22, 0.16, // track — dirt, brown
   0.17, 0.26, 0.19, // cycleway — moss green
+  0.29, 0.285, 0.275, // junction face — mid-grey, between tertiary and residential
 ];
-const HAS_CENTRELINE = [1, 1, 1, 1, 0, 0, 0, 0, 0];
+const HAS_CENTRELINE = [1, 1, 1, 1, 0, 0, 0, 0, 0, 0];
+/** Tone slot for the disc that fills a junction. */
+const JUNCTION_CLASS = 9;
+const TONE_SLOTS = 10;
 
 const VERT = `
 attribute float aAlong;    // metres travelled along the way
@@ -103,8 +107,8 @@ uniform sampler2D uSvf;
 uniform vec2 uExtent;
 uniform vec3 uSunColor;
 uniform float uSunIntensity;
-uniform vec3 uTone[9];
-uniform float uCentreline[9];
+uniform vec3 uTone[10];
+uniform float uCentreline[10];
 ${REVEAL_GLSL}
 
 void main() {
@@ -163,6 +167,7 @@ export class Roads {
     exposure: THREE.Texture,
     reveal: THREE.Texture,
     lift: LiftUniforms,
+    junctions: [number, number, number][] = [],
   ) {
     // Two passes into preallocated typed arrays, same reason as buildings.ts: over
     // 42 km2 there are ~8,500 ways, and plain number[] pushes do not scale.
@@ -208,6 +213,17 @@ export class Roads {
       prepared.push({ pts, k, w, caps });
       vertexCount += (pts.length - 1) * 6 + caps.filter(Boolean).length * CAP_SEGMENTS * 3;
     }
+
+    // A disc at every node where ways actually meet. OSM splits ways at
+    // intersections, so two streets crossing are four separate ribbons whose ends
+    // stop at the node -- leaving an unfilled wedge on the outside of every turn and
+    // a square notch wherever a narrow street T-joins a wide one. The network read
+    // as loose ribbons rather than as a connected street grid. Filling the node with
+    // a disc the width of its widest incident road merges all of them, which is the
+    // same trick the bend caps above already use, applied where ways meet instead of
+    // where one way bends.
+    const JUNCTION_SEGMENTS = 8;
+    vertexCount += junctions.length * JUNCTION_SEGMENTS * 3;
 
     const pos = new Float32Array(vertexCount * 3);
     const off = new Float32Array(vertexCount * 2);
@@ -266,6 +282,23 @@ export class Roads {
       }
     }
 
+    for (const [lon, lat, rM] of junctions) {
+      const [jx, jy] = fields.origin.toXY(lat, lon);
+      // aWidth carries the diameter so the shader's minimum-width rule widens the
+      // junction in step with the streets feeding it; otherwise zooming out left a
+      // pinhole where four widened ribbons met.
+      const w = rM * 2;
+      for (let j = 0; j < JUNCTION_SEGMENTS; j++) {
+        const t0 = (j / JUNCTION_SEGMENTS) * Math.PI * 2;
+        const t1 = ((j + 1) / JUNCTION_SEGMENTS) * Math.PI * 2;
+        // aAcross 0 at the centre keeps the kerb shading off the junction face, and
+        // aAlong 0 keeps the dashed centre line from painting across it.
+        push(jx, jy, 0, 0, 0, 0, JUNCTION_CLASS, w);
+        push(jx, jy, Math.cos(t0), Math.sin(t0), 0, 0.72, JUNCTION_CLASS, w);
+        push(jx, jy, Math.cos(t1), Math.sin(t1), 0, 0.72, JUNCTION_CLASS, w);
+      }
+    }
+
     const used = v;
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(pos.subarray(0, used * 3), 3));
@@ -277,7 +310,7 @@ export class Roads {
     geo.computeBoundingSphere();
 
     const tones: THREE.Color[] = [];
-    for (let i = 0; i < 9; i++) {
+    for (let i = 0; i < TONE_SLOTS; i++) {
       tones.push(new THREE.Color(CLASS_TONE[i * 3], CLASS_TONE[i * 3 + 1], CLASS_TONE[i * 3 + 2]));
     }
 

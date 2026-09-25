@@ -24,6 +24,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import pathlib
 import sys
@@ -67,18 +68,28 @@ INTER_TILE_PAUSE_S = 3
 # a single unlucky probe should not discard the cached tiles a rerun could use.
 PROBE_ATTEMPTS = 3
 
+# node["highway"] is what carries traffic signals, crossings, stop lines and
+# mini-roundabouts. Without it the extract has literally zero highway nodes, so the
+# twin could not show a signal even though OSM maps them -- and a pedestrian router
+# could not tell a signalised crossing from stepping into a trunk road.
+#
+# node["natural"] rather than node["natural"="tree"] so that tree rows and single
+# mapped bushes come through too; canopy is only ever drawn where one of these says
+# a tree actually stands.
 QUERY = """[out:json][timeout:180];
 (
   way["building"]({bbox});
   way["highway"]({bbox});
   way["landuse"]({bbox});
+  way["landcover"]({bbox});
   way["leisure"]({bbox});
   way["natural"]({bbox});
   way["amenity"]({bbox});
   way["waterway"]({bbox});
   node["amenity"]({bbox});
   node["shop"]({bbox});
-  node["natural"="tree"]({bbox});
+  node["highway"]({bbox});
+  node["natural"]({bbox});
   node["place"]({bbox});
 );
 out body;
@@ -103,9 +114,22 @@ out skel qt;
 """
 
 
-def cache_path(bbox: str, tag: str = "") -> pathlib.Path:
-    return CACHE_DIR / ((tag + "_" if tag else "")
-                       + bbox.replace(",", "_").replace(".", "p") + ".json")
+def query_tag(query: str) -> str:
+    """Short digest of the query text, carried in every cache filename.
+
+    The cache used to be keyed on the bbox alone, which meant that editing the query
+    -- adding highway nodes, say -- left 25 tiles on disk that still answered the old
+    question, and a rerun would happily reuse them. The build would look complete and
+    silently be missing whatever had just been added. Keying on the query makes that
+    impossible: a changed query simply has no cache yet.
+    """
+    return hashlib.sha1(query.encode()).hexdigest()[:8]
+
+
+def cache_path(bbox: str, tag: str = "", query: str = "") -> pathlib.Path:
+    parts = [p for p in (tag, query_tag(query) if query else "") if p]
+    prefix = ("_".join(parts) + "_") if parts else ""
+    return CACHE_DIR / (prefix + bbox.replace(",", "_").replace(".", "p") + ".json")
 
 
 def request(mirror: str, data: str, timeout: int) -> bytes:
@@ -167,7 +191,7 @@ def probe(timeout: int = 25) -> list[str]:
 def fetch_tile(bbox: str, mirrors: list[str], timeout: int,
                query: str = QUERY, tag: str = "") -> dict | None:
     """Return a tile's elements, from cache if present. None if every mirror failed."""
-    p = cache_path(bbox, tag)
+    p = cache_path(bbox, tag, query)
     if p.exists():
         try:
             cached = json.loads(p.read_text(encoding="utf8"))
@@ -264,7 +288,7 @@ def main() -> int:
             w = a.west + c * dlon
             bbox = f"{s:.6f},{w:.6f},{s + dlat:.6f},{w + dlon:.6f}"
             i = r * cols + c + 1
-            cached = cache_path(bbox).exists()
+            cached = cache_path(bbox, query=QUERY).exists()
             print(f"[{i}/{total}] {bbox}{' (cached)' if cached else ' ...'}", flush=True)
             t0 = time.time()
             data = fetch_tile(bbox, mirrors, a.timeout)

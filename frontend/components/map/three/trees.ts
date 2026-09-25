@@ -159,11 +159,16 @@ export class Trees {
   private readonly seed: Float32Array;
   private readonly planted: Float32Array;
   private plantedCount = 0;
+  private plantedRecords: TreeRecord[] = [];
+  private budget: number;
+  private readonly fields: TwinFields;
 
   constructor(records: TreeRecord[], fields: TwinFields, exposure: THREE.Texture,
               reveal: THREE.Texture, lift: LiftUniforms) {
     const cap = records.length + SLACK;
     this.baseCount = records.length;
+    this.budget = records.length;
+    this.fields = fields;
 
     this.radius = new Float32Array(cap);
     this.density = new Float32Array(cap);
@@ -219,6 +224,29 @@ export class Trees {
    * stubs that read as nothing against 26 m of relief, and the canopy is what
    * carries the meaning here, so dropping them costs the picture nothing.
    */
+  /**
+   * Draw only the widest `n` measured trees, plus everything planted this session.
+   *
+   * The canopy is 102,877 measured crowns over the zone, which at 80 triangles each
+   * is 8.2M triangles of foliage before a single building is drawn. They arrive
+   * sorted widest first, so a budget drops scraps of hedge and keeps the tree lines
+   * and the woodland -- and at a zoom that fits the whole corridor a 2 m crown is a
+   * third of a pixel anyway.
+   *
+   * Planted canopy is re-written to sit immediately after the budget rather than at
+   * its original index, so an intervention the user placed never disappears because
+   * the camera pulled back.
+   */
+  setBudget(n: number) {
+    const base = Math.max(0, Math.min(this.baseCount, Math.round(n)));
+    if (base === this.budget) return;
+    this.budget = base;
+    for (let i = 0; i < this.plantedCount; i++) {
+      this.write(base + i, this.plantedRecords[i], this.fields, 1);
+    }
+    this.setCount(base + this.plantedCount);
+  }
+
   setLifted(on: boolean) {
     this.trunks.visible = !on;
   }
@@ -256,9 +284,10 @@ export class Trees {
   /** Replace the set of interventionderived trees planted this session. */
   setPlanted(records: TreeRecord[], fields: TwinFields) {
     const n = Math.min(records.length, SLACK);
-    for (let i = 0; i < n; i++) this.write(this.baseCount + i, records[i], fields, 1);
+    this.plantedRecords = records.slice(0, n);
+    for (let i = 0; i < n; i++) this.write(this.budget + i, records[i], fields, 1);
     this.plantedCount = n;
-    this.setCount(this.baseCount + n);
+    this.setCount(this.budget + n);
   }
 
   get planted_count() {

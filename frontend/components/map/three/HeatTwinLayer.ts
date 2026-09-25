@@ -11,7 +11,9 @@ import { makeLutTexture } from "./fields";
 import { RevealField } from "./reveal";
 import { RoutePins } from "./routePins";
 import { VulnerabilitySurface } from "./vulnerability";
+import { Landcover } from "./landcover";
 import { Roads, type RoadFeatureProps } from "./roads";
+import { TrafficSignals, type SignalRecord } from "./signals";
 import { SunExposurePass } from "./sunExposure";
 import { Trees, type TreeRecord } from "./trees";
 
@@ -70,6 +72,8 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
   private pinHeat: Uint8Array | null = null;
   private buildings!: Buildings;
   private trees!: Trees;
+  private signals!: TrafficSignals;
+  private landcover!: Landcover;
 
   private sun: SunState = { elevationDeg: 45, azimuthDeg: 180, intensity: 1 };
   private sunDir = new THREE.Vector3(0, 0, 1);
@@ -86,6 +90,8 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     private readonly buildingFeatures: GeoJSON.Feature<GeoJSON.Polygon, BuildingProps>[],
     private readonly treeRecords: TreeRecord[],
     private readonly roadFeatures: GeoJSON.Feature<GeoJSON.LineString, RoadFeatureProps>[],
+    private readonly junctionRecords: [number, number, number][] = [],
+    private readonly signalRecords: SignalRecord[] = [],
   ) {}
 
   // ---------------------------------------------------------------- lifecycle
@@ -112,7 +118,9 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     this.lift.uLiftHeatA.value = this.ground.heatTextures.a;
     this.lift.uLiftHeatB.value = this.ground.heatTextures.b;
 
-    this.roads = new Roads(this.roadFeatures, this.fields, exposure, reveal, this.lift);
+    this.landcover = new Landcover(this.fields, exposure, reveal, this.lift);
+    this.roads = new Roads(this.roadFeatures, this.fields, exposure, reveal, this.lift,
+                           this.junctionRecords);
     this.buildings = new Buildings(this.buildingFeatures, this.fields, exposure, reveal, this.lift);
     this.trees = new Trees(this.treeRecords, this.fields, exposure, reveal, this.lift);
 
@@ -121,13 +129,16 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     );
 
     this.pins = new RoutePins(this.fields, reveal, makeLutTexture(), this.lift);
+    this.signals = new TrafficSignals(this.signalRecords, this.fields, exposure, reveal, this.lift);
 
     this.scene.add(this.vulnerability.mesh);
     this.scene.add(this.pins.mesh);
+    this.scene.add(this.landcover.mesh);
     this.scene.add(this.roads.mesh);
     this.scene.add(this.ground.mesh);
     this.scene.add(this.buildings.mesh);
     this.scene.add(this.trees.canopy);
+    this.scene.add(this.signals.mesh);
     this.scene.add(this.trees.trunks);
 
     this.applySun();
@@ -145,12 +156,14 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
   onRemove() {
     this.exposurePass?.dispose();
     this.roads?.dispose();
+    this.landcover?.dispose();
     this.reveal?.dispose();
     this.vulnerability?.dispose();
     this.pins?.dispose();
     this.ground?.dispose();
     this.buildings?.dispose();
     this.trees?.dispose();
+    this.signals?.dispose();
     this.renderer?.dispose();
   }
 
@@ -170,6 +183,8 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     // Markers ride the same mode easing: flat labels on the 2D map, standing
     // signs at the z plane in the twin, animated between the two.
     this.pins?.setGrow(this.grow);
+    // Masts rise with the buildings; the painted crossings stay flat either way.
+    this.signals?.setGrow(this.grow);
 
     // Keep the route's temperature profile readable as the camera pulls back.
     // Recomputed per frame rather than on a zoom event: MapLibre eases zoom over
@@ -180,6 +195,11 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
       const mpp = (156543.03392 * Math.cos(lat)) / Math.pow(2, z);
       this.pins.setPixelScale(mpp);
       this.roads?.setPixelScale(mpp);
+      this.signals?.setPixelScale(mpp);
+      // Canopy budget by how much ground a pixel covers. Close in, everything; at a
+      // zoom that fits Narhe to Swargate a 2 m crown is sub-pixel, so the smallest
+      // crowns come off first and the tree lines stay.
+      this.trees?.setBudget(mpp <= 0.6 ? Infinity : mpp <= 1.6 ? 46000 : mpp <= 4 ? 18000 : 7000);
       const cv = this.map.getCanvas();
       this.pins.setViewport(cv.width, cv.height);
     }
@@ -194,6 +214,7 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     this.buildings.mesh.visible = visible;
     this.trees.canopy.visible = visible;
     this.trees.trunks.visible = visible;
+    this.landcover?.setVisible(visible);
 
     // the sun march only re-runs when the sun has actually moved
     const t0 = performance.now();
@@ -239,9 +260,11 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     const intensity = e > 0 ? this.sun.intensity : 0;
     this.buildings?.setSun(this.sunDir, intensity, e <= 2, this.sunColor, this.sun.airC);
     this.roads?.setSun(intensity, this.sunColor);
+    this.landcover?.setSun(intensity);
     this.trees?.setSun(this.sunDir, intensity, this.sunColor);
     this.vulnerability?.setSun(this.sunDir, intensity, this.sunColor);
     this.pins?.setSun(this.sunDir, intensity, this.sunColor);
+    this.signals?.setSun(intensity);
   }
 
   /** Keyframes bracketing the timeline position; blended in temperature space. */
