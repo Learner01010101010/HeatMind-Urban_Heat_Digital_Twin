@@ -9,6 +9,7 @@ import { GroundHeat } from "./groundHeat";
 import { LIFT_AMPLITUDE_M, makeLiftUniforms, type LiftUniforms } from "./lift";
 import { makeLutTexture } from "./fields";
 import { RevealField } from "./reveal";
+import { RoutePins } from "./routePins";
 import { VulnerabilitySurface } from "./vulnerability";
 import { Roads, type RoadFeatureProps } from "./roads";
 import { SunExposurePass } from "./sunExposure";
@@ -59,6 +60,7 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
   private roads!: Roads;
   private reveal!: RevealField;
   private vulnerability!: VulnerabilitySurface;
+  private pins!: RoutePins;
   private lift!: LiftUniforms;
   private equityOn = false;
   private buildings!: Buildings;
@@ -113,7 +115,10 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
       this.fields, exposure, reveal, makeLutTexture(), this.lift,
     );
 
+    this.pins = new RoutePins(this.fields, reveal, makeLutTexture(), this.lift);
+
     this.scene.add(this.vulnerability.mesh);
+    this.scene.add(this.pins.mesh);
     this.scene.add(this.roads.mesh);
     this.scene.add(this.ground.mesh);
     this.scene.add(this.buildings.mesh);
@@ -137,6 +142,7 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     this.roads?.dispose();
     this.reveal?.dispose();
     this.vulnerability?.dispose();
+    this.pins?.dispose();
     this.ground?.dispose();
     this.buildings?.dispose();
     this.trees?.dispose();
@@ -214,6 +220,7 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     this.roads?.setSun(intensity, this.sunColor);
     this.trees?.setSun(this.sunDir, intensity, this.sunColor);
     this.vulnerability?.setSun(this.sunDir, intensity, this.sunColor);
+    this.pins?.setSun(this.sunDir, intensity, this.sunColor);
   }
 
   /** Keyframes bracketing the timeline position; blended in temperature space. */
@@ -283,6 +290,25 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     if (this.lift) this.lift.uLiftAmp.value = on ? LIFT_AMPLITUDE_M : 0;
     this.trees?.setLifted(on);
     this.map?.triggerRepaint();
+  }
+
+  /**
+   * Stand a temperature pin every PIN_SPACING_M along a route, as [lat, lon] pairs.
+   *
+   * Each pin reads its own temperature from the heat field on the GPU, so the whole
+   * profile re-scales when the timeline moves without this being called again. Pass
+   * an empty array to clear.
+   */
+  setRoutePins(coords: [number, number][]) {
+    if (!this.pins) return;
+    if (coords.length) this.pins.setRoute(coords);
+    else this.pins.clear();
+    this.map?.triggerRepaint();
+  }
+
+  /** How many pins are currently standing (for the development hook). */
+  get pinCount(): number {
+    return this.pins?.count ?? 0;
   }
 
   /** Turn progressive reveal on or off across every layer at once. */
