@@ -75,16 +75,6 @@ class MainActivity : AppCompatActivity() {
 
         configureWebView(binding.webView)
 
-        binding.swipeRefresh.setOnRefreshListener {
-            binding.webView.reload()
-        }
-        // Pull-to-refresh fights a map that pans vertically, so it is only armed when
-        // the WebView is scrolled to the very top — which, for this full-bleed app,
-        // effectively means never during map interaction.
-        binding.swipeRefresh.setOnChildScrollUpCallback { _, _ ->
-            binding.webView.scrollY > 0
-        }
-
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (binding.webView.canGoBack()) binding.webView.goBack() else finish()
@@ -154,7 +144,6 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onPageFinished(view: WebView, url: String) {
-                binding.swipeRefresh.isRefreshing = false
                 binding.loading.visibility = View.GONE
             }
 
@@ -165,7 +154,6 @@ class MainActivity : AppCompatActivity() {
                 // cancelled prefetch is not an app-level error and showing one for
                 // every such request would bury the real failure.
                 if (!request.isForMainFrame) return
-                binding.swipeRefresh.isRefreshing = false
                 binding.loading.visibility = View.GONE
                 binding.errorView.visibility = View.VISIBLE
                 binding.errorDetail.text = getString(

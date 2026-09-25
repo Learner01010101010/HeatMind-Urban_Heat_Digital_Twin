@@ -47,6 +47,13 @@ html,
 body {
   background: var(--color-ink-950);
   color: var(--color-ink-100);
+  /* Swiping down on the map is a pan, never a request to reload. Without this,
+     mobile Chrome and an installed PWA both treat a downward drag that starts at
+     scroll-top as pull-to-refresh and throw the session away mid-gesture — the
+     same bug the Android shell had, arriving by a different route. `none` also
+     stops scroll chaining, so a flick inside the route sheet cannot bounce the
+     page behind it. */
+  overscroll-behavior: none;
 }
 
 body {
