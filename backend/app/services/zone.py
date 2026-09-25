@@ -61,6 +61,16 @@ def box_blur(a: np.ndarray, radius_cells: int) -> np.ndarray:
     return out
 
 
+# Crown radius to height for urban trees runs about 1:2. Only OSM's own point trees
+# need this -- they carry no height tag -- and it is bounded so a mis-tagged crown
+# radius cannot produce a 40 m shadow-caster.
+def _tree_height_m(t: dict) -> float:
+    h = t.get("height_m")
+    if h:
+        return float(h)
+    return float(min(20.0, max(3.5, t["radius_m"] * 2.0)))
+
+
 def _seed(osm_id: object) -> int:
     """Stable per-building integer for procedural facade variation.
 
@@ -172,23 +182,35 @@ class Zone:
         self.trees_dropped_on_road = len(self.data["trees"]) - len(self.trees)
 
         canopy = np.zeros((R, C))
+        tree_h = np.zeros((R, C))
         for t in self.trees:
             x, y = geo.to_xy(t["lat"], t["lon"])
-            m = geo.disk_mask(x, y, t["radius_m"] + geo.CELL_M * 0.5)
+            reach = t["radius_m"] + geo.CELL_M * 0.5
+            m = geo.disk_mask(x, y, reach)
             if m:
                 rs, cs, d = m
-                cov = np.clip(1.35 - d / (t["radius_m"] + geo.CELL_M * 0.5), 0, 1) * t["density"]
+                cov = np.clip(1.35 - d / reach, 0, 1) * t["density"]
                 sub = canopy[rs, cs]
                 np.maximum(sub, np.minimum(1.0, sub + cov), out=sub)
+                hs = tree_h[rs, cs]
+                np.maximum(hs, np.where(cov > 0, _tree_height_m(t), 0.0), out=hs)
         canopy[building] = 0
         canopy = np.clip(canopy, 0, 0.95)
+        tree_h = np.where(canopy > 0, tree_h, 0.0)
 
         self.surface = surface
         self.height = height
         self.building = building
         self.road = road_mask
         self.canopy = canopy
-        self.tree_height = np.where(canopy > 0.12, 8.0, 0.0)
+        # Measured canopy height, not a flat 8 m for every tree in the city.
+        #
+        # Shadow length is h / tan(elevation), so the assumed height went straight
+        # into where the shade fell. At a 30 degree sun a 4 m roadside shrub was
+        # casting 13.9 m of shadow it does not cast, and a 15 m rain tree was losing
+        # 12 m of shade it does. The heights come from the same 1 m raster the crowns
+        # do, so the shade now lands where the canopy actually reaches.
+        self.tree_height = tree_h
         self.traffic = box_blur(traffic, 1)
         # Neighbourhood effects
         self.water_cooling = np.clip(box_blur(water.astype(float), 6) * 3.0, 0, 1)  # ~60 m reach

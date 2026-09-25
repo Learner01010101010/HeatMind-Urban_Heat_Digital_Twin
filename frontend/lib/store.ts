@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import type { CompareResult, InterventionKind, InterventionResult, Persona, Scenario } from "./api";
+import type { BreakStop, CompareResult, InterventionKind, InterventionResult, Persona, Scenario } from "./api";
 
 /** Every calculation runs on live conditions at the user's current time. */
 export const SCENARIO: Scenario = "live";
@@ -178,6 +178,8 @@ interface MapState {
   equityOn: boolean;
   /** Progressive reveal: only draw the twin where the user has been. */
   revealOn: boolean;
+  /** The hydration or rest stop whose detail sheet is open, if any. */
+  selectedBreak: BreakStop | null;
   set: (p: Partial<Omit<MapState, "set">>) => void;
 }
 
@@ -205,5 +207,6 @@ export const useMap = create<MapState>()((set) => ({
   // Corridor-first: the twin draws where you are and where you are going, not the
   // whole zone. MyLocation still offers "Show whole zone" to override it.
   revealOn: true,
+  selectedBreak: null,
   set: (p) => set(p),
 }));

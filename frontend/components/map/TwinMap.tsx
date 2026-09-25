@@ -132,6 +132,7 @@ export default function TwinMap() {
   const spotMarkers = useRef<maplibregl.Marker[]>([]);
   const interventionMarkersRef = useRef<maplibregl.Marker[]>([]);
   const communityMarkersRef = useRef<maplibregl.Marker[]>([]);
+  const breakMarkersRef = useRef<maplibregl.Marker[]>([]);
   const meMarker = useRef<maplibregl.Marker | null>(null);
   const fittedFor = useRef<string | null>(null);
 
@@ -550,6 +551,46 @@ export default function TwinMap() {
     approvedPois?.features.forEach((f) => addMarker(f.geometry.coordinates[1], f.geometry.coordinates[0], f.properties.kind, f.properties.name));
   }, [ready, approvedPois]);
 
+  // ───────── hydration and rest stops on the selected route ─────────
+  //
+  // These are not POIs. A POI is a place that exists; a break is a moment in the
+  // walk where this person, at this pace, in today's heat and humidity, will have
+  // sweated out enough to need a drink. Some of them land on a mapped tap and some
+  // of them land nowhere at all, and the pin says which -- a hollow ring where
+  // there is no source is the most useful thing the map can show about the stretches
+  // of this city that have no public water.
+  useEffect(() => {
+    const map = ready;
+    breakMarkersRef.current.forEach((m) => m.remove());
+    breakMarkersRef.current = [];
+    if (!ready || !map) return;
+    const route = compare?.routes.find((r) => r.id === selected) ?? compare?.routes[0];
+    const stops = route?.breaks?.stops ?? [];
+    for (const st of stops) {
+      if (st.lat === null || st.lon === null) continue;
+      const d = document.createElement("div");
+      d.className = `hm-break-pin${st.has_source ? "" : " dry"}`;
+      d.dataset.kind = st.type;
+      d.innerHTML = st.type === "rest" ? "&#9612;" : "";
+      d.title = `${st.type === "rest" ? "Rest" : "Drink"} at ${(st.at_m / 1000).toFixed(1)} km`;
+      // MapLibre detects a map click from mousedown/pointerdown on the canvas
+      // container, and markers are children of it, so stopping only the click event
+      // still let the tap fall through and open the map's own inspect popup over
+      // this sheet. Every step of the gesture has to be stopped.
+      for (const type of ["pointerdown", "mousedown", "touchstart"]) {
+        d.addEventListener(type, (ev) => ev.stopPropagation());
+      }
+      d.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        ev.preventDefault();
+        useMap.getState().set({ selectedBreak: st });
+      });
+      breakMarkersRef.current.push(
+        new maplibregl.Marker({ element: d, anchor: "center" }).setLngLat([st.lon, st.lat]).addTo(map),
+      );
+    }
+  }, [ready, compare, selected]);
+
   // ───────── POIs ─────────
   useEffect(() => {
     const map = ready;
@@ -674,6 +715,13 @@ export default function TwinMap() {
     const map = ready;
     if (!ready || !map || !base) return;
     const onClick = async (ev: maplibregl.MapMouseEvent) => {
+      // Markers live inside the canvas container, and MapLibre reads a map click
+      // from the container, so a tap on a break pin arrives here as well and would
+      // open the "what is it like here" popup on top of the pin's own sheet.
+      // Stopping the DOM event at the marker does not help: the map's listener runs
+      // first. Asking where the click came from does.
+      const from = ev.originalEvent?.target as HTMLElement | null;
+      if (from?.closest?.(".hm-break-pin")) return;
       const st = useMap.getState();
       if (st.pickMode === "origin" || st.pickMode === "destination") {
         setEndpoint(st.pickMode, { lat: ev.lngLat.lat, lon: ev.lngLat.lng, label: `Pinned · ${ev.lngLat.lat.toFixed(4)}, ${ev.lngLat.lng.toFixed(4)}` });

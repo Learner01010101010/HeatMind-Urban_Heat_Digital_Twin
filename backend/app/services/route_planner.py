@@ -1,6 +1,7 @@
 """Orchestrates the five engines into route comparisons, forecasts and live simulation."""
 from __future__ import annotations
 
+import math
 import threading
 import uuid
 from collections import OrderedDict
@@ -11,6 +12,7 @@ import numpy as np
 from . import geo
 from .explanation_service import explain
 from .heat_twin_service import get_twin
+from . import break_planner
 from .prediction_service import TIMELINE_OFFSETS
 from .risk_scoring import CAUTION_C, PERSONAS, score_route
 from .routing_service import Path, StreetGraph
@@ -36,6 +38,37 @@ class RoutePlanner:
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _at_arrival(g, src: int, piece_seconds: np.ndarray, frames: list, pvs: list[dict],
+                    limit_s: float = math.inf):
+        """Per-piece feels/exposure/intensity, sampled at the time each piece is reached.
+
+        Frames sit 15 minutes apart, so a piece reached at 37 minutes is read as
+        two-thirds of the way from the 30-minute frame to the 45-minute one. Beyond
+        the last frame the walk is longer than the forecast and the final frame is
+        held, which is the honest thing to do with a number that does not exist yet.
+        """
+        offs = np.asarray(TIMELINE_OFFSETS, dtype=float)
+        if len(offs) < 2:
+            return pvs[0]["feels"], pvs[0]["exposure"], frames[0].intensity
+
+        reach_min = g.reach_seconds(src, piece_seconds, limit_s) / 60.0
+        m = np.clip(reach_min, offs[0], offs[-1])
+        hi = np.clip(np.searchsorted(offs, m, side="right"), 1, len(offs) - 1)
+        lo = hi - 1
+        span = offs[hi] - offs[lo]
+        w = np.where(span > 0, (m - offs[lo]) / np.maximum(span, 1e-9), 0.0)
+
+        idx = np.arange(len(piece_seconds))
+        feels = np.stack([pv["feels"] for pv in pvs])
+        expo = np.stack([pv["exposure"] for pv in pvs])
+        inten = np.asarray([f.intensity for f in frames], dtype=float)
+        feels_t = feels[lo, idx] * (1 - w) + feels[hi, idx] * w
+        expo_t = expo[lo, idx] * (1 - w) + expo[hi, idx] * w
+        inten_t = inten[lo] * (1 - w) + inten[hi] * w
+        return feels_t, expo_t, inten_t
+
     def compare(self, *, origin: tuple[float, float], destination: tuple[float, float], persona: str,
                 scenario: str, depart: datetime, temp_delta: float = 0.0, extra_paths: list[Path] | None = None,
                 compare_id: str | None = None) -> dict:
@@ -53,9 +86,19 @@ class RoutePlanner:
         pvs = [g.piece_values(f, shady) for f in frames]
         pv0 = pvs[0]
         piece_seconds = g.p_len / P["speed_ms"]
-        # Heat-aversion penalty relative to the coolest streets right now (so shade vs sun really matters)
-        ref = max(CAUTION_C - P["vulnerability_shift_c"], float(np.percentile(pv0["feels"], 10)))
-        penalty = np.clip(pv0["feels"] - ref, 0, None) / 4 + 0.6 * pv0["exposure"] * f0.intensity
+
+        # Cost every street by the sun that will be on it when the walker gets there,
+        # not by the sun at the moment they set off. The frames already span the next
+        # three hours; this just reads each piece from the one matching its own
+        # arrival time instead of reading all of them from frame zero.
+        # Nothing beyond the last forecast frame can be costed differently anyway, so
+        # the reach search stops there rather than mapping the whole zone.
+        feels_t, expo_t, inten_t = self._at_arrival(
+            g, src, piece_seconds, frames, pvs, limit_s=TIMELINE_OFFSETS[-1] * 60.0)
+
+        # Heat-aversion penalty relative to the coolest streets on offer
+        ref = max(CAUTION_C - P["vulnerability_shift_c"], float(np.percentile(feels_t, 10)))
+        penalty = np.clip(feels_t - ref, 0, None) / 4 + 0.6 * expo_t * inten_t
 
         paths = g.candidate_paths(src, dst, piece_seconds, penalty)
         if not paths:
@@ -153,6 +196,31 @@ class RoutePlanner:
                 self._store.popitem(last=False)
         return result
 
+
+    @staticmethod
+    def _along_walk(minutes: np.ndarray, stacks: dict[str, np.ndarray],
+                    intens: np.ndarray) -> dict:
+        """Per-piece conditions interpolated to the minute each piece is reached.
+
+        Frames sit 15 minutes apart, so a piece reached at 37 minutes reads two thirds
+        of the way from the 30-minute frame to the 45-minute one. Past the last frame
+        the walk outruns the forecast and the final frame is held, which is the honest
+        thing to do with a number that does not exist yet.
+        """
+        offs = np.asarray(TIMELINE_OFFSETS, dtype=float)
+        if len(offs) < 2:
+            return {k: v[0] for k, v in stacks.items()} | {"intensity": float(intens[0])}
+        m = np.clip(minutes, offs[0], offs[-1])
+        hi = np.clip(np.searchsorted(offs, m, side="right"), 1, len(offs) - 1)
+        lo = hi - 1
+        span = offs[hi] - offs[lo]
+        w = np.where(span > 0, (m - offs[lo]) / np.maximum(span, 1e-9), 0.0)
+        cols = np.arange(len(m))
+        out = {k: v[lo, cols] * (1 - w) + v[hi, cols] * w for k, v in stacks.items()}
+        # One scalar for the whole walk, weighted by how long it is spent in each part.
+        out["intensity"] = float(np.mean(intens[lo] * (1 - w) + intens[hi] * w))
+        return out
+
     # ------------------------------------------------------------------
     def _build_route(self, cid: str, i: int, path: Path, P: dict, persona: str, frames, pvs) -> dict:
         g = self.graph
@@ -174,13 +242,34 @@ class RoutePlanner:
             along.sort(key=lambda p: p["at_m"])
         stop_pos = [p["at_m"] for p in along if p["type"] in ("water", "rest", "cooling_center", "shade")]
 
+        # Minutes into the walk at the middle of each piece. Within a chosen route this
+        # is exact -- cumulative distance over pace -- so no estimate is involved.
+        walk_min = (np.cumsum(secs) - secs / 2) / 60.0
+        stacks = {k: np.stack([pv[k][idx] for pv in pvs])
+                  for k in ("feels", "exposure", "surface_excess", "asphalt")}
+        intens = np.asarray([f.intensity for f in frames], dtype=float)
+
         forecast, scored0 = [], None
-        for off, f, pv in zip(TIMELINE_OFFSETS, frames, pvs):
-            s = score_route(persona=persona, seconds=secs, lengths=lens, feels=pv["feels"][idx],
-                            exposure=pv["exposure"][idx], surface_excess=pv["surface_excess"][idx],
-                            asphalt=pv["asphalt"][idx], intensity=f.intensity, poi_positions_m=stop_pos, total_m=total)
+        for off, f in zip(TIMELINE_OFFSETS, frames):
+            # Score the walk as it will be lived, not as a snapshot: every piece read
+            # at the clock time the walker is standing on it. Over a two-hour route
+            # the sun swings about 30 degrees of azimuth, so the far half was being
+            # reported against shade that will have moved well off it by then.
+            cond = self._along_walk(off + walk_min, stacks, intens)
+            s = score_route(persona=persona, seconds=secs, lengths=lens,
+                            feels=cond["feels"], exposure=cond["exposure"],
+                            surface_excess=cond["surface_excess"], asphalt=cond["asphalt"],
+                            intensity=cond["intensity"], poi_positions_m=stop_pos, total_m=total)
             if scored0 is None:
                 scored0 = s
+                # The hydration and rest plan belongs to the walk you are about to
+                # take, so it is built from the same arrival-time conditions the
+                # headline score uses rather than from a snapshot.
+                breaks = break_planner.plan(
+                    persona=persona, minutes=secs / 60.0, cum_m=cum,
+                    feels=cond["feels"], exposure=cond["exposure"],
+                    intensity=cond["intensity"], rh=f.weather.rh,
+                    along=along, total_m=total, depart=f.when)
             forecast.append({"offset_min": off, "time": f.when.isoformat(), "score": s["score"], "band": s["band"],
                              "heat_dose": s["metrics"]["heat_dose"], "pct_shaded": s["metrics"]["pct_shaded"],
                              "peak_feels_c": s["metrics"]["peak_feels_c"]})
@@ -218,6 +307,7 @@ class RoutePlanner:
             "distance_m": scored0["metrics"]["distance_m"],
             "heat_risk_score": scored0["score"], "band": scored0["band"], "factors": scored0["factors"],
             "metrics": scored0["metrics"], "pois_along_route": along, "segments": segs, "forecast": forecast,
+            "breaks": breaks,
         }
 
     def _fallback_name(self, road_i: int) -> str:

@@ -14,7 +14,8 @@ from fastapi.middleware.gzip import GZipMiddleware
 
 from .config import ALLOWED_ORIGINS, ANTHROPIC_API_KEY, BBOX, CENTER, COLOR_MAX_C, COLOR_MIN_C, ZONE_CITY, ZONE_NAME
 from .db.session import init_db
-from .routers import community, equity, heat, open_data, passport, planner, pois, risk, routes, shadow
+from .routers import (community, equity, heat, open_data, passport, photo, planner, pois, risk,
+                      routes, shadow)
 from .services.heat_twin_service import get_twin
 from .services.risk_scoring import weights_table
 from .services.route_planner import get_planner
@@ -44,7 +45,8 @@ app = FastAPI(
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_methods=["*"], allow_headers=["*"])
 
-for r in (heat.router, shadow.router, pois.router, routes.router, risk.router, passport.router, equity.router, planner.router, community.router, open_data.router):
+for r in (heat.router, shadow.router, pois.router, routes.router, risk.router, passport.router,
+          equity.router, planner.router, community.router, open_data.router, photo.router):
     app.include_router(r)
 
 

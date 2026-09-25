@@ -191,6 +191,85 @@ class StreetGraph:
     def edge_ids(self, path: Path) -> set[int]:
         return {se if se >= 0 else -se - 1 for se in path.edges}
 
+    def reach_seconds(self, src: int, piece_seconds: np.ndarray,
+                      limit_s: float = math.inf) -> np.ndarray:
+        """Walking seconds from `src` to each piece, ignoring heat.
+
+        This is what makes the search time-aware. The sun moves about 15 degrees of
+        azimuth an hour, so on a 100-minute walk the shade at the far end of a route
+        is cast in a noticeably different direction than at the near end -- and
+        costing every street with the sun frozen at departure routes people into
+        shade that will have moved by the time they reach it.
+
+        A plain shortest-time Dijkstra, no heat penalty: this asks the earliest the
+        walker could be somewhere, which is the right question before the heat-averse
+        path is known. It is an estimate -- the chosen route may dawdle -- but it is
+        wrong by minutes where freezing the sun is wrong by the whole journey.
+
+        Bounded, and run on plain lists. Unlike the point-to-point searches this one
+        has no destination to stop at, so left unbounded it expands all 28,405 nodes
+        of the zone and numpy scalar indexing in the inner loop made that 14 seconds
+        a request. Pieces past the bound keep the departure frame; they are further
+        away than the walk can plausibly wander.
+        """
+        E = len(self.eu)
+        t_edge = np.bincount(self.p_edge, weights=piece_seconds, minlength=E).tolist()
+        idx_of, node_ids = self._dense_nodes()
+        dist = [math.inf] * len(node_ids)
+        si = idx_of.get(int(src))
+        if si is None:
+            return np.zeros(len(piece_seconds))
+        dist[si] = 0.0
+        pq: list[tuple[float, int]] = [(0.0, si)]
+        adj_dense = self._dense_adj()
+        while pq:
+            d, i = heapq.heappop(pq)
+            if d > dist[i]:
+                continue
+            if d > limit_s:
+                break
+            for j, e in adj_dense[i]:
+                nd = d + t_edge[e]
+                if nd < dist[j]:
+                    dist[j] = nd
+                    heapq.heappush(pq, (nd, j))
+
+        darr = np.asarray(dist, dtype=float)
+        eu_i = np.searchsorted(node_ids, self.eu)
+        ev_i = np.searchsorted(node_ids, self.ev)
+        edge_reach = np.minimum(darr[eu_i], darr[ev_i])
+        edge_reach[~np.isfinite(edge_reach)] = 0.0
+        return edge_reach[self.p_edge] + piece_seconds * 0.5
+
+    def _dense_nodes(self) -> tuple[dict[int, int], np.ndarray]:
+        """Map the graph's OSM node ids onto 0..N-1, once.
+
+        Node keys are raw OSM ids -- 245,644,945 to 14,211,816,095 over this zone --
+        so they cannot be used as array indices. Sorted dense ids let the reach
+        search use a flat list for distances instead of a dict, which is most of why
+        it is fast enough to run on every request.
+        """
+        cached = getattr(self, "_dense_node_cache", None)
+        if cached is None:
+            ids = np.array(sorted(self.adj.keys()), dtype=np.int64)
+            cached = ({int(v): i for i, v in enumerate(ids)}, ids)
+            self._dense_node_cache = cached
+        return cached
+
+    def _dense_adj(self) -> list[list[tuple[int, int]]]:
+        """Adjacency over the dense node indices: (neighbour index, edge id)."""
+        cached = getattr(self, "_dense_adj_cache", None)
+        if cached is None:
+            idx_of, node_ids = self._dense_nodes()
+            cached = [[] for _ in range(len(node_ids))]
+            for n, links in self.adj.items():
+                i = idx_of[int(n)]
+                row = cached[i]
+                for nb, e, _direction in links:
+                    row.append((idx_of[int(nb)], int(e)))
+            self._dense_adj_cache = cached
+        return cached
+
     def candidate_paths(self, src: int, dst: int, piece_seconds: np.ndarray, piece_penalty: np.ndarray,
                         max_routes: int = 3) -> list[Path]:
         """Fastest + Pareto-spread heat-averse alternatives (α sweep + penalty method)."""

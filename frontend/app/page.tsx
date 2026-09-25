@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
+import BreakSheet from "@/components/hud/BreakSheet";
 import EquityToggle from "@/components/hud/EquityToggle";
 import { InsightChip, InsightPanel } from "@/components/hud/InsightChip";
 import InterventionPanel from "@/components/hud/InterventionPanel";
@@ -158,6 +159,8 @@ export default function Home() {
       )}
 
       {/* ── on-demand drawers ── */}
+      <BreakSheet />
+
       <Drawer open={panel === "insight"} onClose={close} eyebrow="Heat insights · live" title="One number isn't enough">
         <InsightPanel />
       </Drawer>
