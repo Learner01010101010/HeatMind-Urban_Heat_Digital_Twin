@@ -342,8 +342,18 @@ export default function TwinMap() {
     const route = compare.routes.find((r) => r.id === selected) ?? compare.routes[0];
     if (!route?.geometry?.length) return;
     layer.revealRoute(route.geometry);
+    // Stand the thermal profile on the selected route. Only the selected one: three
+    // overlapping rows of pins would be unreadable, and the comparison between
+    // alternatives is what the route chips are for.
+    layer.setRoutePins(route.geometry);
     if (!useMap.getState().revealOn) useMap.getState().set({ revealOn: true });
   }, [compare, selected, layerEpoch]);
+
+  // A cleared trip takes its pins with it, otherwise the last route's profile is
+  // left standing on a map that no longer has a route on it.
+  useEffect(() => {
+    if (!compare) layerRef.current?.setRoutePins([]);
+  }, [compare, layerEpoch]);
 
   useEffect(() => {
     return () => {

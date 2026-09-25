@@ -40,18 +40,26 @@ uniform float uLiftBlend;
 uniform float uLiftHasB;
 uniform float uLiftAmp;          // metres at index 100; 0 disables the whole mechanic
 
-/** SDG-10 heat vulnerability at this cell, 0..100. */
-float vulnerabilityAt(vec2 uv) {
+/**
+ * Pedestrian feels-like temperature at this cell, °C.
+ *
+ * Blended between the two keyframes in temperature space, exactly as the ground
+ * plane does, so nothing reading this can disagree with the colour on the ground
+ * about what the temperature is. Shared rather than reimplemented per layer for
+ * that reason.
+ */
+float feelsAt(vec2 uv) {
   vec2 p = clamp(uv, 0.0, 1.0);
-  // Blend in temperature space, exactly as the ground plane does, so the relief and
-  // the colour under it can never disagree about what the temperature is.
   float a = texture2D(uLiftHeatA, p).r;
   float b = texture2D(uLiftHeatB, p).r;
   float v = mix(a, mix(a, b, uLiftBlend), uLiftHasB);
-  float feels = 20.0 + v * 255.0 / 4.0;
+  return 20.0 + v * 255.0 / 4.0;
+}
 
-  float heatTerm = clamp((feels - 30.0) / 15.0, 0.0, 1.0);
-  float staticTerm = texture2D(uVulnStatic, p).r * 55.0;   // decoded index points
+/** SDG-10 heat vulnerability at this cell, 0..100. */
+float vulnerabilityAt(vec2 uv) {
+  float heatTerm = clamp((feelsAt(uv) - 30.0) / 15.0, 0.0, 1.0);
+  float staticTerm = texture2D(uVulnStatic, clamp(uv, 0.0, 1.0)).r * 55.0;
   return clamp(45.0 * heatTerm + staticTerm, 0.0, 100.0);
 }
 
