@@ -194,6 +194,8 @@ interface MapState {
   revealOn: boolean;
   /** The hydration or rest stop whose detail sheet is open, if any. */
   selectedBreak: BreakStop | null;
+  /** Emergency sheet: nearest water, shade and rest from where the user is now. */
+  emergencyOpen: boolean;
   set: (p: Partial<Omit<MapState, "set">>) => void;
 }
 
@@ -223,5 +225,6 @@ export const useMap = create<MapState>()((set) => ({
   // whole zone. MyLocation still offers "Show whole zone" to override it.
   revealOn: true,
   selectedBreak: null,
+  emergencyOpen: false,
   set: (p) => set(p),
 }));

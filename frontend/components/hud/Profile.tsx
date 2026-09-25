@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, ChevronRight, HeartPulse, RotateCcw } from "lucide-react";
+import { ChevronRight, HeartPulse, RotateCcw } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { Persona } from "@/lib/api";
@@ -85,18 +85,15 @@ export function ProfilePanel() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2.5">
-        <Link href="/passport" className="press rounded-[22px] p-4 bg-white/[0.04] hover:bg-white/[0.07]">
-          <HeartPulse size={20} className="text-ink-200" />
-          <div className="text-[15px] font-semibold mt-3">Heat Passport</div>
-          <div className="text-[12px] text-ink-300">Your heat exposure log</div>
-        </Link>
-        <Link href="/about" className="press rounded-[22px] p-4 bg-white/[0.04] hover:bg-white/[0.07]">
-          <BookOpen size={20} className="text-ink-200" />
-          <div className="text-[15px] font-semibold mt-3">How it works</div>
-          <div className="text-[12px] text-ink-300">Engines & data sources</div>
-        </Link>
-      </div>
+      {/* One card, full width: "How it works" was removed from here. The About page
+          it pointed at is still at /about and still linked from the model and
+          data-source citations that need it — it just no longer takes half the
+          drawer above the persona picker, which is what people open this for. */}
+      <Link href="/passport" className="press block rounded-[22px] p-4 bg-white/[0.04] hover:bg-white/[0.07]">
+        <HeartPulse size={20} className="text-ink-200" />
+        <div className="text-[15px] font-semibold mt-3">Heat Passport</div>
+        <div className="text-[12px] text-ink-300">Your heat exposure log</div>
+      </Link>
 
       <section>
         <h3 className="text-[13px] font-medium uppercase tracking-[0.12em] text-ink-400 mb-2.5">Who&apos;s heading out</h3>

@@ -38,6 +38,15 @@ export default function EquityToggle({ compact = false }: { compact?: boolean })
             <p className="text-[12px] text-ink-300 leading-relaxed mb-2">
               Where heat, lack of shade/water cooling, and distance from rest &amp; water points compound. <strong className="text-ink-100">Not demographic data</strong> — no census or income data exists for this zone.
             </p>
+            {/* The relief is read by colour before it is read by height, so the scale
+                has to be on screen. Blue is a low index, yellow a high one. */}
+            <div className="mt-3">
+              <div className="h-2 rounded-full" style={{ background: "var(--vuln-gradient)" }} />
+              <div className="flex justify-between text-[9.5px] text-ink-400 mt-1">
+                <span>Lower index · cooler</span>
+                <span>Higher index · hotter</span>
+              </div>
+            </div>
             {summary && (
               <div className="grid grid-cols-3 gap-2 text-center mt-3">
                 <div>

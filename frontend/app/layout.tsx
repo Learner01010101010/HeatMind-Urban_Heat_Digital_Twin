@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./globals.css";
+import EmergencySheet from "@/components/hud/EmergencySheet";
 import GlobalNav from "@/components/shell/GlobalNav";
 import PrefsEffect from "@/components/shell/PrefsEffect";
 
@@ -28,6 +29,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <PrefsEffect />
         {children}
         <GlobalNav />
+        {/* Mounted beside the nav rather than inside the map page: the Emergency
+            button is on every screen, so the sheet it opens has to be too. */}
+        <EmergencySheet />
       </body>
     </html>
   );
