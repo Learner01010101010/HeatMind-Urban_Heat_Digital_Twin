@@ -10,6 +10,7 @@ import { fmtDelta, fmtTemp, heatColor, heatLabel, riskColor } from "@/lib/heatCo
 import { INTERVENTION_STYLE } from "@/lib/interventionStyle";
 import { POI_STYLE } from "@/lib/poiStyle";
 import { solarIntensity, solarPosition } from "@/lib/solar";
+import { deviceProfile } from "@/lib/deviceProfile";
 import { alongRoute, cumulative, useNav } from "@/lib/navigation";
 import { atTime, keyframes, SCENARIO, TIMELINE, useMap, usePrefs } from "@/lib/store";
 import { HeatTwinLayer } from "./three/HeatTwinLayer";
@@ -149,6 +150,7 @@ export default function TwinMap() {
   const compare = useMap((s) => s.compare);
   const selected = useMap((s) => s.selectedRouteId);
   const travelMode = usePrefs((s) => s.mode);
+  const timeScrubbing = useMap((s) => s.timeScrubbing);
   const navActive = useNav((s) => s.active);
   const navRouteId = useNav((s) => s.routeId);
   const busStops = useBusStops();
@@ -179,6 +181,13 @@ export default function TwinMap() {
     el.current.appendChild(host);
     const map = new maplibregl.Map({
       container: host,
+      // Every fragment cost in the scene — ground heat, buildings, canopy, the sun
+      // march's consumers — scales with this. A phone at DPR 3 renders nine times
+      // the fragments of DPR 1 for a difference almost nobody can resolve on a
+      // 6-inch panel, so mobile is capped at 2 and desktop is left untouched.
+      pixelRatio: Number.isFinite(deviceProfile().maxPixelRatio)
+        ? Math.min(window.devicePixelRatio || 1, deviceProfile().maxPixelRatio)
+        : undefined,
       style: {
         version: 8,
         sources: {
@@ -509,6 +518,11 @@ export default function TwinMap() {
     }
     layerRef.current?.setMode(twin);
   }, [ready, mode, reduceMotion, layerEpoch]);
+
+  // ───────── shadow march: coarse while scrubbing, exact at rest ─────────
+  useEffect(() => {
+    layerRef.current?.setSunMoving(timeScrubbing);
+  }, [timeScrubbing, layerEpoch]);
 
   // ───────── navigation: the chase camera ─────────
   // Follows the same progress value the HUD reads, so the instruction on screen and

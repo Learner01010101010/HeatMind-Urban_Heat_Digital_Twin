@@ -15,6 +15,7 @@ import { BreakBeacons, type BreakBeaconRecord } from "./breakBeacons";
 import { Landcover } from "./landcover";
 import { Roads, type RoadFeatureProps } from "./roads";
 import { TrafficSignals, type SignalRecord } from "./signals";
+import { treeBudgetFor } from "@/lib/deviceProfile";
 import { SunDisc } from "./sunDisc";
 import { SunExposurePass } from "./sunExposure";
 import { Trees, type TreeRecord } from "./trees";
@@ -105,6 +106,14 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
   private growTarget = 0;
   private plantGrow = 1;
   private lastMarchMs = 0;
+  // Last values pushed to the GPU, so an unchanged frame pushes nothing.
+  private lastMpp = -1;
+  private lastViewW = -1;
+  private lastViewH = -1;
+  private lastCenterLat = NaN;
+  private lastCenterLon = NaN;
+  /** True while the timeline is being dragged — coarsens the sun march. */
+  private sunMoving = false;
   private revealOn = false;
 
   constructor(
@@ -223,25 +232,44 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     // Recomputed per frame rather than on a zoom event: MapLibre eases zoom over
     // many frames, and sampling only at the ends makes the pins pop between sizes.
     if (this.pins && this.map) {
+      const c = this.map.getCenter();
       const z = this.map.getZoom();
-      const lat = (this.map.getCenter().lat * Math.PI) / 180;
+      const lat = (c.lat * Math.PI) / 180;
       const mpp = (156543.03392 * Math.cos(lat)) / Math.pow(2, z);
-      this.pins.setPixelScale(mpp);
-      this.roads?.setPixelScale(mpp);
-      this.signals?.setPixelScale(mpp);
-      this.beacons?.setPixelScale(mpp);
-      // Canopy budget by how much ground a pixel covers. Close in, everything; at a
-      // zoom that fits Narhe to Swargate a 2 m crown is sub-pixel, so the smallest
-      // crowns come off first and the tree lines stay.
-      this.trees?.setBudget(mpp <= 0.6 ? Infinity : mpp <= 1.6 ? 46000 : mpp <= 4 ? 18000 : 7000);
       const cv = this.map.getCanvas();
-      this.pins.setViewport(cv.width, cv.height);
+
+      // These uniforms only change when the camera or the canvas does, but this runs
+      // on every frame of every animation -- including the ones where only the sun
+      // moved. Pushing a dozen unchanged uniforms per frame is not free on a phone,
+      // and setBudget in particular used to walk the planted-tree list each call.
+      if (mpp !== this.lastMpp) {
+        this.lastMpp = mpp;
+        this.pins.setPixelScale(mpp);
+        this.roads?.setPixelScale(mpp);
+        this.signals?.setPixelScale(mpp);
+        this.beacons?.setPixelScale(mpp);
+        // Canopy budget by how much ground a pixel covers. Close in, everything; at a
+        // zoom that fits Narhe to Swargate a 2 m crown is sub-pixel, so the smallest
+        // crowns come off first and the tree lines stay. The tiers themselves are
+        // per-device: a phone cannot carry a desktop's canopy at the same zoom.
+        this.trees?.setBudget(treeBudgetFor(mpp));
+      }
+
+      if (cv.width !== this.lastViewW || cv.height !== this.lastViewH) {
+        this.lastViewW = cv.width;
+        this.lastViewH = cv.height;
+        this.pins.setViewport(cv.width, cv.height);
+        this.sunDisc?.setViewport(cv.width, cv.height);
+      }
+
       // The sun rides the view rather than the zone: anchored to the map centre it
       // stays on screen wherever the user pans, which is what makes it a compass for
       // the shadows rather than a fixed object somewhere over Narhe.
-      const c = this.map.getCenter();
-      this.sunDisc?.setAnchor(c.lat, c.lng);
-      this.sunDisc?.setViewport(cv.width, cv.height);
+      if (c.lat !== this.lastCenterLat || c.lng !== this.lastCenterLon) {
+        this.lastCenterLat = c.lat;
+        this.lastCenterLon = c.lng;
+        this.sunDisc?.setAnchor(c.lat, c.lng);
+      }
     }
 
     if (this.plantGrow < 1) {
@@ -258,7 +286,8 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
 
     // the sun march only re-runs when the sun has actually moved
     const t0 = performance.now();
-    if (this.exposurePass.update(this.renderer, this.sun.elevationDeg, this.sun.azimuthDeg)) {
+    if (this.exposurePass.update(this.renderer, this.sun.elevationDeg, this.sun.azimuthDeg,
+                                 this.sunMoving)) {
       this.lastMarchMs = performance.now() - t0;
     }
 
@@ -304,6 +333,20 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     this.sun = sun;
     this.applySun();
     this.map?.triggerRepaint();
+  }
+
+  /**
+   * Tell the twin the timeline is being dragged.
+   *
+   * Only the caller knows the difference between "the sun moved because time passed"
+   * and "the sun moved because a finger is on the scrubber" -- and the second one
+   * arrives as a burst of positions that would otherwise each force a full march.
+   */
+  setSunMoving(moving: boolean) {
+    if (this.sunMoving === moving) return;
+    this.sunMoving = moving;
+    // Settling: re-march once at full granularity now that the drag has ended.
+    if (!moving) this.map?.triggerRepaint();
   }
 
   private applySun() {
