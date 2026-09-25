@@ -15,9 +15,11 @@ from fastapi.middleware.gzip import GZipMiddleware
 from .config import ALLOWED_ORIGINS, ANTHROPIC_API_KEY, BBOX, CENTER, COLOR_MAX_C, COLOR_MIN_C, ZONE_CITY, ZONE_NAME
 from .db.session import init_db
 from .routers import (community, equity, heat, open_data, passport, photo, planner, pois, risk,
-                      routes, shadow)
+                      routes, shadow, transit)
 from .services.heat_twin_service import get_twin
+from .services.modes import table as travel_modes_table
 from .services.risk_scoring import weights_table
+from .services.transit import describe as transit_describe
 from .services.route_planner import get_planner
 from .services.weather import base_time, weather_service
 from .services.zone import CODE_LABEL, get_zone
@@ -46,7 +48,8 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_methods=["*"], allow_headers=["*"])
 
 for r in (heat.router, shadow.router, pois.router, routes.router, risk.router, passport.router,
-          equity.router, planner.router, community.router, open_data.router, photo.router):
+          equity.router, planner.router, community.router, open_data.router, photo.router,
+          transit.router):
     app.include_router(r)
 
 
@@ -66,6 +69,8 @@ def meta():
         "llm_enabled": bool(ANTHROPIC_API_KEY),
         "weather_error": weather_service.last_error,
         "risk_model": weights_table(),
+        "travel_modes": travel_modes_table(),
+        "transit": transit_describe(),
         "provenance": [
             {"layer": "Street network", "source": "OpenStreetMap (Overpass)", "status": "real"},
             {"layer": "Building footprints", "source": "OpenStreetMap", "status": "real"},
@@ -80,6 +85,8 @@ def meta():
             {"layer": "Industrial heat", "source": "Waste heat from footprints inferred as industrial; the OSM extract carries no industrial tags, so no premises here is confirmed industrial", "status": "modelled"},
             {"layer": "Sky view factor", "source": "Horizon scan of OSM building heights (32 azimuths, 200 m) — Oke canyon geometry", "status": "modelled"},
             {"layer": "Building typology", "source": "OSM building tag where present (37 of 998); geometry + land-use inference otherwise", "status": "mixed"},
+            {"layer": "Bus stops", "source": "OpenStreetMap public-transport tags (PMPML operator where recorded)", "status": "real"},
+            {"layer": "Bus timetable", "source": "None published for this corridor — headway and ride time are assumed, not scheduled", "status": "modelled"},
             {"layer": "Heat vulnerability index", "source": "Environmental + infrastructure-access proxy (heat × cooling deficit × POI distance) — no demographic or census data used", "status": "modelled"},
         ],
     }

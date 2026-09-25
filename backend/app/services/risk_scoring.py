@@ -77,8 +77,24 @@ def band(score: float) -> str:
 
 def score_route(*, persona: str, seconds: np.ndarray, lengths: np.ndarray, feels: np.ndarray, exposure: np.ndarray,
                 surface_excess: np.ndarray, asphalt: np.ndarray, intensity: float, poi_positions_m: list[float],
-                total_m: float) -> dict:
-    """Score one route from its per-piece arrays (time-weighted aggregation, PRD §10.1 step 3)."""
+                total_m: float, speed_ms: float | None = None, mode_exposure: float = 1.0,
+                mode_exertion: float = 1.0) -> dict:
+    """Score one route from its per-piece arrays (time-weighted aggregation, PRD §10.1 step 3).
+
+    `speed_ms`, `mode_exposure` and `mode_exertion` carry the travel mode. All three
+    default to the pedestrian values, so a walking route scores exactly as it did
+    before modes existed and the PRD model is unchanged for it.
+
+    What the mode legitimately changes:
+      * `speed_ms` — the pace the rest-gap between water points is measured at. A
+        1.2 km gap is a 15-minute exposure on foot and under three minutes on a
+        two-wheeler.
+      * `mode_exposure` — how much of the direct sun reaches the traveller. A sealed
+        cabin does not receive the radiant street load a pedestrian does, so scoring
+        a car by the sun on the asphalt overstates its risk badly.
+      * `mode_exertion` — metabolic load. A driver sitting still is not exerting, and
+        the exertion factor is weighted "Very High" for a delivery rider.
+    """
     P = PERSONAS[persona]
     mins = seconds / 60.0
     dur = float(mins.sum())
@@ -87,12 +103,15 @@ def score_route(*, persona: str, seconds: np.ndarray, lengths: np.ndarray, feels
 
     dose = float((mins * np.clip(f_p - CAUTION_C, 0, None)).sum())  # °C·min above caution
     minutes_danger = float(mins[f_p >= DANGER_C].sum())
-    shaded = (exposure < 0.35) if day > 0 else np.ones_like(exposure, dtype=bool)
+    # Shielding acts on the sun that lands on the person, not on the street: the
+    # street is as sunlit as it ever was, the traveller is simply under a roof.
+    eff_exposure = exposure * mode_exposure
+    shaded = (eff_exposure < 0.35) if day > 0 else np.ones_like(exposure, dtype=bool)
     pct_shaded = float((mins * shaded).sum() / max(dur, 1e-6))
     peak = float(np.percentile(f_p, 95))
     mean_f = float((mins * f_p).sum() / max(dur, 1e-6))
     heat_mod = float(np.clip((mean_f - 30) / 16, 0, 1))
-    speed = P["speed_ms"]
+    speed = speed_ms if speed_ms is not None else P["speed_ms"]
 
     stops = sorted([0.0, *poi_positions_m, total_m])
     max_gap_m = max((b - a for a, b in zip(stops[:-1], stops[1:])), default=total_m)
@@ -103,9 +122,9 @@ def score_route(*, persona: str, seconds: np.ndarray, lengths: np.ndarray, feels
         "duration": 1 - math.exp(-dose / 220.0),
         "peak": float(np.clip((peak - 34.0) / 20.0, 0, 1)),
         "shade": (1 - pct_shaded) * day,
-        "exertion": P["pace_factor"] * min(1.0, dur / 35.0) * heat_mod,
+        "exertion": P["pace_factor"] * mode_exertion * min(1.0, dur / 35.0) * heat_mod,
         "rest": float(np.clip(max_gap_min / 12.0, 0, 1)) * heat_mod,
-        "surface": float(np.clip(surf / 18.0, 0, 1)),
+        "surface": float(np.clip(surf / 18.0, 0, 1)) * mode_exposure,
     }
     w = {k: LEVEL[lv] for k, lv in P["weights"].items()}
     wsum = sum(w.values())

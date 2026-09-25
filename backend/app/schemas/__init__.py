@@ -7,6 +7,8 @@ from pydantic import BaseModel, Field
 
 Persona = Literal["student", "worker", "senior", "cyclist", "gig_worker"]
 Scenario = Literal["demo", "live"]
+#: How the trip is made, independent of who is making it. See services/modes.py.
+TravelMode = Literal["walk", "cycle", "bike", "car", "bus"]
 
 
 class LatLon(BaseModel):
@@ -22,6 +24,7 @@ class CompareRequest(BaseModel):
     depart_at: str | None = Field(None, description="ISO time; default = scenario clock ('now' in live mode)")
     depart_offset_min: int = Field(0, ge=0, le=720)
     temp_delta_c: float = Field(0.0, ge=-10, le=15)
+    mode: TravelMode = Field("walk", description="Travel mode; sets speed, usable streets and sun exposure")
 
 
 class SimulateParams(BaseModel):

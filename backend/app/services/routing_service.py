@@ -16,10 +16,14 @@ import numpy as np
 
 from . import geo
 from .heat_twin_service import Frame
+from .modes import Mode
 from .zone import SURFACES, Zone
 
 PIECE_M = 8.0
 ALPHAS = [0.0, 0.6, 1.6, 4.0, 10.0]
+#: Added to an edge a mode may not use. Larger than any real route cost in this zone
+#: (7,525 roads over ~4 km) and small enough to stay far from float overflow.
+FORBIDDEN_EDGE_COST = 1e7
 
 
 @dataclass
@@ -46,6 +50,8 @@ class StreetGraph:
         self.eu, self.ev = eu, ev
         self.elen = np.array(elen)
         self.eroad = np.array(eroad)
+        self._mode_masks: dict[str, np.ndarray] = {}
+        self._snap_cache: dict[str, tuple[np.ndarray, np.ndarray]] = {}
         self.adj: dict[int, list[tuple[int, int, int]]] = defaultdict(list)  # node -> (nbr, edge, dir)
         for e, (u, v) in enumerate(zip(eu, ev)):
             self.adj[u].append((v, e, 1))
@@ -119,6 +125,48 @@ class StreetGraph:
         self.p_asphalt_centre = (surf[self.p_r, self.p_c] == SURFACES["asphalt"][0]).astype(float)
 
     # ------------------------------------------------------------------
+    def mode_mask(self, mode: Mode) -> np.ndarray:
+        """Per-edge boolean: may this mode use this edge?
+
+        One graph serves every mode. Building a separate graph per mode would mean
+        five copies of a 7,525-road network and five warm-ups at startup, to express
+        something that is really just a cost of infinity on some edges.
+
+        Cached per mode key: the mask is a pure function of the road table, which
+        does not change after ingest.
+        """
+        cached = self._mode_masks.get(mode.key)
+        if cached is not None:
+            return cached
+        roads = self.zone.data["roads"]
+        ok = np.ones(len(roads), dtype=bool)
+        for i, r in enumerate(roads):
+            if r["highway"] in mode.forbidden_highways:
+                ok[i] = False
+            elif mode.key == "cycle" and not r.get("bikeable", True):
+                # Per-road, from OSM's own bicycle tag — finer than a class list.
+                ok[i] = False
+            elif mode.key == "walk" and not r.get("walkable", True):
+                ok[i] = False
+        mask = ok[self.eroad]
+        self._mode_masks[mode.key] = mask
+        return mask
+
+    def mode_edge_cost(self, mode: Mode, base_cost: np.ndarray) -> np.ndarray:
+        """`base_cost` with edges this mode cannot use made unreachable.
+
+        A large finite number rather than `inf`: Dijkstra sums these, and inf + inf
+        propagates NaN through the numpy cost arithmetic upstream. This is far beyond
+        any real path cost, so a route only crosses a forbidden edge when there is no
+        legal route at all — and then it is better to return the illegal one with the
+        distance honestly reported than to claim the points are unconnected.
+        """
+        mask = self.mode_mask(mode)
+        out = base_cost.copy()
+        out[~mask] += FORBIDDEN_EDGE_COST
+        return out
+
+    # ------------------------------------------------------------------
     def piece_values(self, f: Frame, shady_side: bool) -> dict[str, np.ndarray]:
         """Per-piece feels/exposure/surface for one twin frame."""
         if shady_side:
@@ -142,10 +190,35 @@ class StreetGraph:
             "surface_code": self.zone.surface[rr, cc],
         }
 
-    def snap(self, lat: float, lon: float) -> int:
+    def snap(self, lat: float, lon: float, mode: Mode | None = None) -> int:
+        """Nearest graph node, restricted to ones this mode can actually leave from.
+
+        Snapping a car to the footpath node outside a building strands it: every edge
+        out of that node carries the forbidden-cost barrier, so the search pays it at
+        least once and the "route" starts with an illegal segment. Snapping to the
+        nearest *drivable* node instead is what a navigation app does when it puts
+        you on the road rather than in the lobby.
+        """
         x, y = geo.to_xy(lat, lon)
-        d = np.hypot(self._main_xy[:, 0] - x, self._main_xy[:, 1] - y)
-        return int(self._main_ids[int(np.argmin(d))])
+        ids, xy = self._snap_targets(mode)
+        if not len(ids):
+            ids, xy = self._main_ids, self._main_xy
+        d = np.hypot(xy[:, 0] - x, xy[:, 1] - y)
+        return int(ids[int(np.argmin(d))])
+
+    def _snap_targets(self, mode: Mode | None) -> tuple[np.ndarray, np.ndarray]:
+        """Main-component nodes with at least one edge this mode may use."""
+        if mode is None:
+            return self._main_ids, self._main_xy
+        cached = self._snap_cache.get(mode.key)
+        if cached is not None:
+            return cached
+        mask = self.mode_mask(mode)
+        usable = {int(self.eu[e]) for e in np.where(mask)[0]} | {int(self.ev[e]) for e in np.where(mask)[0]}
+        keep = np.array([i for i, n in enumerate(self._main_ids) if int(n) in usable], dtype=int)
+        cached = (self._main_ids[keep], self._main_xy[keep]) if len(keep) else (self._main_ids, self._main_xy)
+        self._snap_cache[mode.key] = cached
+        return cached
 
     def dijkstra(self, src: int, dst: int, edge_cost: np.ndarray) -> Path | None:
         dist = {src: 0.0}
@@ -192,7 +265,7 @@ class StreetGraph:
         return {se if se >= 0 else -se - 1 for se in path.edges}
 
     def reach_seconds(self, src: int, piece_seconds: np.ndarray,
-                      limit_s: float = math.inf) -> np.ndarray:
+                      limit_s: float = math.inf, mode: Mode | None = None) -> np.ndarray:
         """Walking seconds from `src` to each piece, ignoring heat.
 
         This is what makes the search time-aware. The sun moves about 15 degrees of
@@ -213,7 +286,14 @@ class StreetGraph:
         away than the walk can plausibly wander.
         """
         E = len(self.eu)
-        t_edge = np.bincount(self.p_edge, weights=piece_seconds, minlength=E).tolist()
+        t_arr = np.bincount(self.p_edge, weights=piece_seconds, minlength=E)
+        if mode is not None:
+            # The earliest a traveller could reach a street has to be asked over the
+            # streets they can actually use: estimating a car's arrival along a
+            # footpath shortcut reads the sun at the wrong time for every piece
+            # downstream of it.
+            t_arr = self.mode_edge_cost(mode, t_arr)
+        t_edge = t_arr.tolist()
         idx_of, node_ids = self._dense_nodes()
         dist = [math.inf] * len(node_ids)
         si = idx_of.get(int(src))
@@ -271,11 +351,21 @@ class StreetGraph:
         return cached
 
     def candidate_paths(self, src: int, dst: int, piece_seconds: np.ndarray, piece_penalty: np.ndarray,
-                        max_routes: int = 3) -> list[Path]:
-        """Fastest + Pareto-spread heat-averse alternatives (α sweep + penalty method)."""
+                        max_routes: int = 3, mode: Mode | None = None) -> list[Path]:
+        """Fastest + Pareto-spread heat-averse alternatives (α sweep + penalty method).
+
+        `mode` restricts the search to streets that mode may use: a car is kept off
+        the footpaths through the campus, a bus off the service lanes. Without it the
+        search is free to route a car down a flight of steps.
+        """
         E = len(self.eu)
         t_edge = np.bincount(self.p_edge, weights=piece_seconds, minlength=E)
         h_edge = np.bincount(self.p_edge, weights=piece_seconds * piece_penalty, minlength=E)
+        if mode is not None:
+            # Applied to the time term only. The heat term is multiplied by alpha in
+            # the sweep below, which would scale the barrier with it and let a large
+            # alpha make a forbidden street look cheap again.
+            t_edge = self.mode_edge_cost(mode, t_edge)
 
         def overlap(a: Path, b: Path) -> float:
             ea, eb = self.edge_ids(a), self.edge_ids(b)
