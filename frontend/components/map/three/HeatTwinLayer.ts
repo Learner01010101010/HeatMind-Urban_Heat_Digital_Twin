@@ -9,6 +9,7 @@ import { GroundHeat } from "./groundHeat";
 import { LIFT_AMPLITUDE_M, makeLiftUniforms, type LiftUniforms } from "./lift";
 import { makeLutTexture } from "./fields";
 import { RevealField } from "./reveal";
+import { RouteLine, type RouteLineRecord } from "./routeLine";
 import { RoutePins } from "./routePins";
 import { VulnerabilitySurface } from "./vulnerability";
 import { BreakBeacons, type BreakBeaconRecord } from "./breakBeacons";
@@ -82,6 +83,11 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
   private reveal!: RevealField;
   private vulnerability!: VulnerabilitySurface;
   private pins!: RoutePins;
+  private routeLine!: RouteLine;
+  private routeLineRecords: RouteLineRecord[] = [];
+  private rebuildTimer: number | null = null;
+  /** Reveal coverage the current geometry was built for. */
+  private builtCoverage = 0;
   private sunDisc!: SunDisc;
   private lift!: LiftUniforms;
   private equityOn = false;
@@ -156,6 +162,8 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     );
 
     this.pins = new RoutePins(this.fields, reveal, makeLutTexture(), this.lift);
+    this.routeLine = new RouteLine(this.fields, this.lift);
+    this.routeLine.set(this.routeLineRecords);
     this.beacons = new BreakBeacons(this.fields, this.lift);
     this.beacons.set(this.beaconRecords, this.fields);
 
@@ -165,6 +173,7 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     this.overlayScene.add(this.sunDisc.group);
     this.scene.add(this.ground.mesh);
     this.scene.add(this.beacons.mesh);
+    this.scene.add(this.routeLine.mesh);
 
     // The three heavy builders run on later frames -- see buildDeferred. Buildings
     // alone is ~2.85 million vertices and ~130 MB of attributes; with roads and
@@ -194,7 +203,121 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
    * the browser has had a chance to paint, which is precisely the yield being bought
    * here. A microtask would run before paint and stage nothing.
    */
+
+  /**
+   * Which features are worth building at all.
+   *
+   * The corridor reveal has always decided what you can *see*; until now it did that
+   * with a multiply at the end of the fragment shader, which means the whole city was
+   * still transformed, rasterised and then thrown away. Over 37 km² that is 2.85
+   * million building vertices and ~130 MB of attributes to display a 600 m band.
+   *
+   * So the same field now decides what gets *built*. A cross-city route reveals
+   * roughly a tenth of the zone, and this is the difference between paying for a tenth
+   * of the geometry and paying for all of it to discard nine tenths. With reveal off
+   * the predicate is constant-true and the scene is exactly what it was.
+   *
+   * The margin is generous on purpose: a footprint is kept if any part of its
+   * neighbourhood is revealed, so the shader still gets to do the fading and nothing
+   * pops into existence at the corridor's soft edge.
+   */
+  private inCorridor(lat: number, lon: number, marginM = 60): boolean {
+    if (!this.reveal || this.reveal.isAll) return true;
+    const [x, y] = this.fields.origin.toXY(lat, lon);
+    return this.reveal.covers(x, y, marginM);
+  }
+
+  private corridorFeatures() {
+    // Nothing revealed yet means nothing to cull against, not "build nothing". A
+    // denied location and no route planned would otherwise leave the twin empty and
+    // looking broken, which is a far worse failure than drawing more than needed.
+    if (!this.reveal || this.reveal.isAll || this.reveal.coverage <= 0) {
+      return {
+        buildings: this.buildingFeatures,
+        roads: this.roadFeatures,
+        trees: this.treeRecords,
+        signals: this.signalRecords,
+      };
+    }
+    const ringIn = (f: GeoJSON.Feature<GeoJSON.Polygon, BuildingProps>) => {
+      const r = f.geometry.coordinates[0];
+      // First, middle and last vertex rather than a true centroid: a footprint is a
+      // few tens of metres across and the margin is 60, so three samples cannot miss
+      // one that matters, and this runs 56,000 times.
+      for (const i of [0, r.length >> 1, r.length - 1]) {
+        const c = r[i];
+        if (c && this.inCorridor(c[1], c[0])) return true;
+      }
+      return false;
+    };
+    const lineIn = (f: GeoJSON.Feature<GeoJSON.LineString, RoadFeatureProps>) => {
+      const c = f.geometry.coordinates;
+      for (let i = 0; i < c.length; i++) {
+        if (this.inCorridor(c[i][1], c[i][0])) return true;
+      }
+      return false;
+    };
+    return {
+      buildings: this.buildingFeatures.filter(ringIn),
+      roads: this.roadFeatures.filter(lineIn),
+      trees: this.treeRecords.filter((t) => this.inCorridor(t.lat, t.lon)),
+      signals: this.signalRecords.filter((g) => this.inCorridor(g.lat, g.lon)),
+    };
+  }
+
+
+  /**
+   * Rebuild the heavy layers for the corridor as it stands now.
+   *
+   * Scheduled rather than immediate, and coalesced: planning a trip fires a reveal,
+   * a pin update and a route line in the same tick, and walking fires one per
+   * position fix. Rebuilding the building mesh three times for one user action would
+   * cost far more than the culling saves.
+   *
+   * The rebuild itself is the same deferred, frame-by-frame staging the first build
+   * uses, so the map stays interactive while the new corridor lands rather than
+   * freezing on a 2.85-million-vertex allocation.
+   */
+  private scheduleCorridorRebuild() {
+    if (this.rebuildTimer !== null || this.disposed) return;
+    this.rebuildTimer = window.setTimeout(() => {
+      this.rebuildTimer = null;
+      if (this.disposed || !this.exposurePass || !this.reveal) return;
+      const now = this.reveal.coverage;
+      // Only worth the churn when the corridor has actually grown. Switching between
+      // two alternatives that share most of their length adds almost nothing.
+      if (now <= this.builtCoverage + 0.004) return;
+      this.builtCoverage = now;
+      this.disposeHeavy();
+      this.buildDeferred(this.exposurePass.target.texture, this.reveal.texture);
+    }, 180);
+  }
+
+  /** Tear down just the corridor-scoped layers, leaving ground, pins and beacons. */
+  private disposeHeavy() {
+    for (const [obj, layer] of [
+      [this.buildings?.mesh, this.buildings],
+      [this.roads?.mesh, this.roads],
+      [this.landcover?.mesh, this.landcover],
+      [this.signals?.mesh, this.signals],
+    ] as const) {
+      if (obj) this.scene.remove(obj);
+      layer?.dispose();
+    }
+    if (this.trees) {
+      this.scene.remove(this.trees.canopy);
+      this.scene.remove(this.trees.trunks);
+      this.trees.dispose();
+    }
+    this.buildings = undefined as never;
+    this.roads = undefined as never;
+    this.landcover = undefined as never;
+    this.signals = undefined as never;
+    this.trees = undefined as never;
+  }
+
   private buildDeferred(exposure: THREE.Texture, reveal: THREE.Texture) {
+    const only = this.corridorFeatures();
     const stages: (() => void)[] = [
       () => {
         this.landcover = new Landcover(this.fields, exposure, reveal, this.lift);
@@ -202,20 +325,20 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
         this.landcover.setVisible(this.grow > 0.002);
       },
       () => {
-        this.roads = new Roads(this.roadFeatures, this.fields, exposure, reveal, this.lift,
+        this.roads = new Roads(only.roads, this.fields, exposure, reveal, this.lift,
                                this.junctionRecords);
         this.scene.add(this.roads.mesh);
         this.roads.setSun(this.sun.elevationDeg > 0 ? this.sun.intensity : 0, this.sunColor);
       },
       () => {
-        this.buildings = new Buildings(this.buildingFeatures, this.fields, exposure, reveal, this.lift);
+        this.buildings = new Buildings(only.buildings, this.fields, exposure, reveal, this.lift);
         this.scene.add(this.buildings.mesh);
         this.buildings?.setGrow(this.grow);
         this.buildings.mesh.visible = this.grow > 0.002;
         this.applySun(); // the building shader needs the current sun, not the default
       },
       () => {
-        this.trees = new Trees(this.treeRecords, this.fields, exposure, reveal, this.lift);
+        this.trees = new Trees(only.trees, this.fields, exposure, reveal, this.lift);
         this.scene.add(this.trees.canopy);
         this.scene.add(this.trees.trunks);
         const visible = this.grow > 0.002;
@@ -225,7 +348,7 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
         if (this.plantedTreeRecords.length) this.trees.setPlanted(this.plantedTreeRecords, this.fields);
       },
       () => {
-        this.signals = new TrafficSignals(this.signalRecords, this.fields, exposure, reveal, this.lift);
+        this.signals = new TrafficSignals(only.signals, this.fields, exposure, reveal, this.lift);
         this.scene.add(this.signals.mesh);
         this.signals.setGrow(this.grow);
         this.applySun();
@@ -263,6 +386,7 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     this.reveal?.dispose();
     this.vulnerability?.dispose();
     this.pins?.dispose();
+    this.routeLine?.dispose();
     this.sunDisc?.dispose();
     this.ground?.dispose();
     this.buildings?.dispose();
@@ -291,6 +415,10 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     // Masts rise with the buildings; the painted crossings stay flat either way.
     this.signals?.setGrow(this.grow);
     this.beacons?.setGrow(this.grow);
+    // The 3D route ribbon belongs to the twin only. On the flat map MapLibre's own
+    // line layers come back, and leaving this one up would draw a second route
+    // floating at terrain height over the first.
+    this.routeLine?.setVisible(this.grow > 0.002);
 
     // Keep the route's temperature profile readable as the camera pulls back.
     // Recomputed per frame rather than on a zoom event: MapLibre eases zoom over
@@ -312,6 +440,7 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
         this.roads?.setPixelScale(mpp);
         this.signals?.setPixelScale(mpp);
         this.beacons?.setPixelScale(mpp);
+        this.routeLine?.setPixelScale(mpp);
         // Canopy budget by how much ground a pixel covers. Close in, everything; at a
         // zoom that fits Narhe to Swargate a 2 m crown is sub-pixel, so the smallest
         // crowns come off first and the tree lines stay. The tiers themselves are
@@ -483,7 +612,10 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
    */
   addPositionFix(lat: number, lon: number, radiusM?: number) {
     if (!this.reveal) return;
-    if (this.reveal.addFix(lat, lon, radiusM)) this.map?.triggerRepaint();
+    if (this.reveal.addFix(lat, lon, radiusM)) {
+      this.scheduleCorridorRebuild();
+      this.map?.triggerRepaint();
+    }
   }
 
   /**
@@ -496,7 +628,10 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
    */
   revealRoute(coords: [number, number][], radiusM?: number) {
     if (!this.reveal) return;
-    if (this.reveal.addPath(coords, radiusM)) this.map?.triggerRepaint();
+    if (this.reveal.addPath(coords, radiusM)) {
+      this.scheduleCorridorRebuild();
+      this.map?.triggerRepaint();
+    }
   }
 
   /**
@@ -530,6 +665,21 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     this.map?.triggerRepaint();
   }
 
+  /**
+   * The routes to draw on the street, as the twin's own geometry.
+   *
+   * Called with every route in the comparison, not just the chosen one, so the
+   * alternatives stay visible to be compared against — thinner, dimmer, and drawn
+   * first so the selected route is never hidden behind one of them.
+   */
+  setRouteLines(records: RouteLineRecord[]) {
+    this.routeLineRecords = records;
+    if (!this.routeLine) return;
+    if (records.length) this.routeLine.set(records);
+    else this.routeLine.clear();
+    this.map?.triggerRepaint();
+  }
+
   /** How many pins are currently standing (for the development hook). */
   get pinCount(): number {
     return this.pins?.count ?? 0;
@@ -548,6 +698,7 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
   /** Drop the reveal mask entirely and show the whole zone. */
   revealAll() {
     this.reveal?.revealAll();
+    this.scheduleCorridorRebuild();
     this.map?.triggerRepaint();
   }
 

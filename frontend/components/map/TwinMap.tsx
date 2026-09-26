@@ -35,6 +35,9 @@ const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: 
 // an instrument. GET /api/heat/layers still serves the data — it is public API and
 // listed in the open-data catalog — it is just no longer painted as neon.
 const TWIN_LAYERS: string[] = [];
+
+/** The flat map's route rendering. Hidden in the twin, which draws its own. */
+const FLAT_ROUTE_LAYERS = ["route-casing", "route-halo", "route-heat", "route-core"];
 maplibregl.setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
 const equityCache = new Map<string, Promise<EquityIndex>>();
 
@@ -438,13 +441,24 @@ export default function TwinMap() {
     // overlapping rows of pins would be unreadable, and the comparison between
     // alternatives is what the route chips are for.
     layer.setRoutePins(route.geometry);
+    // The route as geometry in the twin. MapLibre's own line layers sit on the
+    // basemap plane, which stopped being the ground the moment the twin started
+    // standing on real elevation.
+    layer.setRouteLines(
+      compare.routes
+        .filter((r) => r.geometry?.length)
+        .map((r) => ({ geometry: r.geometry, color: r.color, selected: r.id === route.id })),
+    );
     if (!useMap.getState().revealOn) useMap.getState().set({ revealOn: true });
   }, [compare, selected, layerEpoch]);
 
   // A cleared trip takes its pins with it, otherwise the last route's profile is
   // left standing on a map that no longer has a route on it.
   useEffect(() => {
-    if (!compare) layerRef.current?.setRoutePins([]);
+    if (!compare) {
+      layerRef.current?.setRoutePins([]);
+      layerRef.current?.setRouteLines([]);
+    }
   }, [compare, layerEpoch]);
 
   useEffect(() => {
@@ -507,6 +521,14 @@ export default function TwinMap() {
     if (!ready || !map) return;
     const twin = mode === "twin";
     TWIN_LAYERS.forEach((id) => map.setLayoutProperty(id, "visibility", twin ? "visible" : "none"));
+    // The route swaps representation with the mode. MapLibre's line layers are
+    // right on the flat map and wrong in the twin: they are painted on the basemap
+    // plane, so with the ground standing on real elevation they sit under the hill
+    // instead of on the street. The twin draws the route as geometry through the
+    // same lift the roads use, and these come off so the two are never both up.
+    FLAT_ROUTE_LAYERS.forEach((id) => {
+      if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", twin ? "none" : "visible");
+    });
     // MAP mode keeps its flat footprints; the 3D layer eases its own extrusions in and
     // out of the ground from inside the render loop, so there is no RAF to drive here.
     map.setLayoutProperty("buildings-2d", "visibility", twin ? "none" : "visible");

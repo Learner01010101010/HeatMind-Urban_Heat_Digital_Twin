@@ -40,6 +40,7 @@ export class RevealField {
   private readonly rows: number;
   private readonly cellM: number;
   private revealedCells = 0;
+  private allRevealed = false;
 
   constructor(private readonly fields: TwinFields) {
     this.cols = fields.cols;
@@ -148,16 +149,52 @@ export class RevealField {
   revealAll() {
     this.data.fill(255);
     this.revealedCells = this.cols * this.rows;
+    this.allRevealed = true;
     this.texture.needsUpdate = true;
   }
 
   clear() {
     this.data.fill(0);
     this.revealedCells = 0;
+    this.allRevealed = false;
     this.texture.needsUpdate = true;
   }
 
-  /** Fraction of the zone revealed so far, 0..1. */
+  /**
+   * Is this point inside the revealed corridor?
+   *
+   * Used to decide what to *build*, not what to shade. The shaders multiply by this
+   * same field to fade the corridor's edge, but a fragment discarded at the end of
+   * the pipeline has already cost its vertex transform, and the whole-zone building
+   * mesh is 2.85 million of them. Asking the question here instead means the geometry
+   * outside the corridor is never created.
+   *
+   * Deliberately generous: `min` of 1 rather than the feathered value, so a building
+   * on the soft edge is built and then faded by the shader, instead of popping into
+   * existence when the corridor creeps over its centroid.
+   */
+  covers(x: number, y: number, marginM = 0): boolean {
+    if (this.allRevealed) return true;
+    // Row 0 is the SOUTH edge here, matching addFix and addPath — this grid is
+    // stored GL-side-up, not in image order.
+    const c0 = Math.max(0, Math.floor((x - marginM) / this.cellM));
+    const c1 = Math.min(this.cols - 1, Math.floor((x + marginM) / this.cellM));
+    const r0 = Math.max(0, Math.floor((y - marginM) / this.cellM));
+    const r1 = Math.min(this.rows - 1, Math.floor((y + marginM) / this.cellM));
+    for (let r = r0; r <= r1; r++) {
+      const base = r * this.cols;
+      for (let c = c0; c <= c1; c++) {
+        if (this.data[base + c] > 0) return true;
+      }
+    }
+    return false;
+  }
+
+  /** True once the whole zone has been revealed — nothing left to cull against. */
+  get isAll(): boolean {
+    return this.allRevealed;
+  }
+
   get coverage(): number {
     return this.revealedCells / (this.cols * this.rows);
   }
