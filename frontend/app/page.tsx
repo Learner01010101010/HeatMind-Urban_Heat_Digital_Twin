@@ -162,7 +162,16 @@ export default function Home() {
       )}
 
       {/* ── bottom ── */}
-      {navRoute ? null : wide ? (
+      {navRoute ? (
+        /* Guidance owns the screen, with one exception: the control that started the
+           simulated position has to still be there to stop it. Hiding the whole rail
+           meant the only way out of a fake trip was the X on the instruction card,
+           which reads as "close the directions" rather than "stop pretending I am
+           here". This is that control and nothing else. */
+        <div className="absolute right-4 bottom-5 z-30 pointer-events-auto">
+          <MyLocation />
+        </div>
+      ) : wide ? (
         <div className="absolute bottom-0 inset-x-0 z-30 p-5 pointer-events-none flex items-end gap-3">
           <div className="pointer-events-auto shrink-0 flex flex-col items-start gap-2">
             {/* The sun readout sits with the timeline: scrubbing moves both the sun in
