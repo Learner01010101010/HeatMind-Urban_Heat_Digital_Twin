@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import type { Route, RouteStep } from "./api";
-import { useGeo } from "./geolocation";
+import { stopSimulation, stopWatch, useGeo } from "./geolocation";
 
 /**
  * Guided navigation along a chosen route.
@@ -38,6 +38,8 @@ export interface NavState {
    * while a real trip still moves at the speed the body is moving.
    */
   simSpeed: number;
+  paused: boolean;
+  forceSimulation: boolean;
   set: (p: Partial<Omit<NavState, "set">>) => void;
 }
 
@@ -49,6 +51,8 @@ export const useNav = create<NavState>()((set) => ({
   startedAt: 0,
   offRouteM: 0,
   simSpeed: 1,
+  paused: false,
+  forceSimulation: false,
   set: (p) => set(p),
 }));
 
@@ -95,8 +99,16 @@ export function alongRoute(geometry: [number, number][], cum: number[], metres: 
   const total = cum[cum.length - 1];
   const d = Math.max(0, Math.min(total, metres));
 
-  let i = 1;
-  while (i < cum.length - 1 && cum[i] < d) i++;
+  // Long city routes can have thousands of vertices; the camera reads this every
+  // frame. Binary search avoids scanning the travelled route again each time.
+  let low = 1;
+  let high = cum.length - 1;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (cum[middle] < d) low = middle + 1;
+    else high = middle;
+  }
+  const i = low;
   const span = cum[i] - cum[i - 1];
   const t = span > 1e-6 ? (d - cum[i - 1]) / span : 0;
   const a = geometry[i - 1];
@@ -178,7 +190,10 @@ export function stepAt(steps: RouteStep[], metres: number): { step: RouteStep; i
 export const ON_ROUTE_M = 45;
 
 /** Begin guidance on a route. */
-export function startNavigation(route: Route) {
+export function startNavigation(route: Route, opts: { simulate?: boolean } = {}) {
+  if (route.geometry.length < 2) return;
+  stopSimulation();
+  if (opts.simulate) stopWatch();
   useNav.getState().set({
     active: true,
     routeId: route.id,
@@ -186,11 +201,18 @@ export function startNavigation(route: Route) {
     startedAt: Date.now(),
     offRouteM: 0,
     live: false,
+    paused: false,
+    forceSimulation: !!opts.simulate,
+    simSpeed: opts.simulate ? 4 : 1,
   });
+  if (opts.simulate) {
+    const [lat, lon] = route.geometry[0];
+    useGeo.getState().set({ status: "simulated", lat, lon, headingDeg: bearingDeg(route.geometry[0], route.geometry[1]), error: null });
+  }
 }
 
 export function stopNavigation() {
-  useNav.getState().set({ active: false, routeId: null, progressM: 0, live: false, offRouteM: 0 });
+  useNav.getState().set({ active: false, routeId: null, progressM: 0, live: false, offRouteM: 0, paused: false, forceSimulation: false });
   // Hand the position back. The simulation borrowed the geolocation store to move
   // the dot; leaving a fabricated fix behind it would have the rest of the app
   // believing the user is standing wherever the demo happened to stop.
@@ -209,11 +231,12 @@ export function advance(route: Route, geometry: [number, number][], cum: number[
   const nav = useNav.getState();
   const geo = useGeo.getState();
   const total = cum[cum.length - 1] ?? 0;
+  if (!nav.active || nav.paused || geometry.length < 2) return nav.progressM;
 
   // A fix this function wrote itself is not evidence of anything. Without this the
   // simulation would feed its own position back in, project it onto the line it came
   // from, and the HUD would report a live GPS lock that does not exist.
-  if (geo.lat != null && geo.lon != null && geo.status !== "simulated") {
+  if (!nav.forceSimulation && geo.lat != null && geo.lon != null && geo.status === "inside") {
     const { alongM, offM } = projectOnto(geometry, cum, [geo.lat, geo.lon]);
     if (offM <= ON_ROUTE_M) {
       nav.set({ live: true, offRouteM: offM, progressM: alongM });
@@ -227,7 +250,8 @@ export function advance(route: Route, geometry: [number, number][], cum: number[
   // The mode's own speed, as the router costed it: 4.9 km/h on foot, 27 on a
   // two-wheeler, 24.8 in a car through modelled congestion.
   const speedMs = ((route.speed_kmh ?? 5) * 1000) / 3600;
-  const next = Math.min(total, nav.progressM + speedMs * (nav.simSpeed || 1) * dtSeconds);
+  const next = Math.min(total, nav.progressM + speedMs * (nav.simSpeed || 1) * Math.max(0, dtSeconds));
+  if (next === nav.progressM) return next;
   nav.set({ progressM: next, live: false });
 
   // Move the position with it. The blue dot, the chase camera and the corridor

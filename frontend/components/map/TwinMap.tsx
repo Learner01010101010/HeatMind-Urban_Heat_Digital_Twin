@@ -11,7 +11,7 @@ import { INTERVENTION_STYLE } from "@/lib/interventionStyle";
 import { POI_STYLE } from "@/lib/poiStyle";
 import { solarIntensity, solarPosition } from "@/lib/solar";
 import { deviceProfile } from "@/lib/deviceProfile";
-import { alongRoute, cumulative, useNav } from "@/lib/navigation";
+import { alongRoute, cumulative, metresBetween, useNav } from "@/lib/navigation";
 import { atTime, keyframes, SCENARIO, TIMELINE, useMap, usePrefs } from "@/lib/store";
 import { HeatTwinLayer } from "./three/HeatTwinLayer";
 import { HeatTwinOverlayLayer, OVERLAY_LAYER_ID } from "./three/overlayLayer";
@@ -142,6 +142,7 @@ export default function TwinMap() {
   const meMarker = useRef<maplibregl.Marker | null>(null);
   const arrowMarker = useRef<maplibregl.Marker | null>(null);
   const fittedFor = useRef<string | null>(null);
+  const segmentColors = useRef(new Map<string, string>());
 
   const meta = useMeta();
   const zone = useZone();
@@ -165,9 +166,6 @@ export default function TwinMap() {
   const simOffset = useMap((s) => s.simOffsetMin);
   const tempDelta = useMap((s) => s.tempDelta);
   const interventionResults = useMap((s) => s.interventionResults);
-  const geoLat = useGeo((s) => s.lat);
-  const geoLon = useGeo((s) => s.lon);
-  const geoStatus = useGeo((s) => s.status);
   const revealOn = useMap((s) => s.revealOn);
   const equityOn = useMap((s) => s.equityOn);
   const [approvedPois, setApprovedPois] = useState<Awaited<ReturnType<typeof api.communityPois>> | null>(null);
@@ -284,7 +282,7 @@ export default function TwinMap() {
       map.addSource("route-seg", { type: "geojson", data: EMPTY });
       map.addLayer({ id: "route-casing", type: "line", source: "routes", layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": "#020306", "line-width": ["case", ["get", "sel"], 15, 9], "line-opacity": ["case", ["get", "sel"], 0.9, 0.55] } });
       map.addLayer({ id: "route-halo", type: "line", source: "routes", layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": ["get", "color"], "line-width": ["case", ["get", "sel"], 12, 6], "line-opacity": ["case", ["get", "sel"], 0.55, 0.28], "line-blur": ["case", ["get", "sel"], 2, 0] } });
-      map.addLayer({ id: "route-heat", type: "line", source: "route-seg", layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": ["get", "c"], "line-width": ["case", ["get", "sel"], 6, 3], "line-opacity": ["case", ["get", "sel"], 1, 0.5] } });
+      map.addLayer({ id: "route-heat", type: "line", source: "route-seg", layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": ["coalesce", ["feature-state", "c"], ["get", "c"]], "line-width": ["case", ["get", "sel"], 6, 3], "line-opacity": ["case", ["get", "sel"], 1, 0.5] } });
       // static centre-line on the selected route (no motion — routes update in place)
       map.addLayer({ id: "route-core", type: "line", source: "routes", filter: ["get", "sel"], layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": "#ffffff", "line-width": 1.5, "line-opacity": 0.85 } });
       setReady(map);
@@ -392,33 +390,37 @@ export default function TwinMap() {
   // so the twin builds up along the route rather than pulsing around a moving disc.
   useEffect(() => {
     const map = ready;
-    const layer = layerRef.current;
-    if (!map || geoLat === null || geoLon === null) return;
-
-    layer?.addPositionFix(geoLat, geoLon);
-
-    // the user's own position is the natural trip origin
-    const cur = useMap.getState().origin;
-    if (!cur || Math.abs(cur.lat - geoLat) > 1e-4 || Math.abs(cur.lon - geoLon) > 1e-4) {
-      useMap.getState().set({
-        origin: {
-          lat: geoLat,
-          lon: geoLon,
-          // a simulated walk is never labelled as a real fix
-          label: geoStatus === "simulated" ? "Simulated position" : "My location",
-        },
-      });
-    }
-
-    if (!meMarker.current) {
-      const d = document.createElement("div");
-      d.className = "hm-me";
-      meMarker.current = new maplibregl.Marker({ element: d }).setLngLat([geoLon, geoLat]).addTo(map);
-    } else {
-      meMarker.current.setLngLat([geoLon, geoLat]);
-    }
-    meMarker.current.getElement().dataset.sim = geoStatus === "simulated" ? "1" : "0";
-  }, [ready, geoLat, geoLon, geoStatus, layerEpoch]);
+    if (!map) return;
+    let lastReveal: [number, number] | null = null;
+    const updatePosition = () => {
+      const { lat, lon, status } = useGeo.getState();
+      if (lat === null || lon === null) {
+        meMarker.current?.remove();
+        meMarker.current = null;
+        return;
+      }
+      // Reveal need only be painted after a few metres, not on every video frame.
+      if (!lastReveal || metresBetween(lastReveal, [lat, lon]) >= 5) {
+        layerRef.current?.addPositionFix(lat, lon);
+        lastReveal = [lat, lon];
+      }
+      // Keep the planned origin fixed during guidance; moving it used to rebuild
+      // endpoint markers and notify the whole app as the simulation advanced.
+      const cur = useMap.getState().origin;
+      if (!useNav.getState().active && (!cur || Math.abs(cur.lat - lat) > 1e-4 || Math.abs(cur.lon - lon) > 1e-4)) {
+        useMap.getState().set({ origin: { lat, lon, label: status === "simulated" ? "Simulated position" : "My location" } });
+      }
+      if (!meMarker.current) {
+        const d = document.createElement("div");
+        d.className = "hm-me";
+        meMarker.current = new maplibregl.Marker({ element: d }).setLngLat([lon, lat]).addTo(map);
+      } else meMarker.current.setLngLat([lon, lat]);
+      meMarker.current.getElement().dataset.sim = status === "simulated" ? "1" : "0";
+    };
+    updatePosition();
+    // Position moves imperative map objects, without rerendering the scene tree.
+    return useGeo.subscribe(updatePosition);
+  }, [ready, layerEpoch]);
 
   useEffect(() => {
     layerRef.current?.setRevealEnabled(revealOn);
@@ -561,25 +563,39 @@ export default function TwinMap() {
     const cum = cumulative(route.geometry);
     let raf = 0;
     let bearing = map.getBearing();
-    const step = () => {
+    let previousTime = performance.now();
+    let shown = map.getCenter();
+    let pitch = map.getPitch();
+    let zoom = map.getZoom();
+    map.stop();
+    const step = (time: number) => {
       const { progressM } = useNav.getState();
       // Look a little ahead of the traveller: aiming the camera exactly at them puts
       // the turn they are being told about off the bottom of the screen.
       const lead = alongRoute(route.geometry, cum, progressM + 28);
       // Shortest-arc damping, or the camera spins the long way round through north.
-      const delta = ((lead.bearing - bearing + 540) % 360) - 180;
-      bearing += delta * (reduceMotion ? 1 : 0.12);
-      map.jumpTo({
-        center: [lead.position[1], lead.position[0]],
-        bearing,
-        pitch: 66,
-        zoom: 17.4,
-      });
+      const dt = Math.min(0.1, (time - previousTime) / 1000);
+      previousTime = time;
+      const damping = reduceMotion ? 1 : 1 - Math.exp(-10 * dt);
+      const twin = mode === "twin";
+      const delta = (((twin ? lead.bearing : 0) - bearing + 540) % 360) - 180;
+      bearing += delta * damping;
+      const lat = shown.lat + (lead.position[0] - shown.lat) * damping;
+      const lon = shown.lng + (lead.position[1] - shown.lng) * damping;
+      const nextPitch = pitch + ((twin ? 60 : 0) - pitch) * damping;
+      const nextZoom = zoom + ((twin ? 17.4 : 16.9) - zoom) * damping;
+      // Paused and completed trips settle without repeatedly repainting a still map.
+      if (Math.abs(lat - shown.lat) + Math.abs(lon - shown.lng) > 1e-9 || Math.abs(delta) > 0.02 || Math.abs(nextPitch - pitch) + Math.abs(nextZoom - zoom) > 0.002) {
+        shown = new maplibregl.LngLat(lon, lat);
+        pitch = nextPitch;
+        zoom = nextZoom;
+        map.jumpTo({ center: shown, bearing, pitch, zoom });
+      }
       raf = requestAnimationFrame(step);
     };
     raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf);
-  }, [ready, navActive, navRouteId, compare, reduceMotion]);
+  }, [ready, navActive, navRouteId, compare, reduceMotion, mode]);
 
   // hottest / coolest beacons in twin mode
   useEffect(() => {
@@ -754,16 +770,21 @@ export default function TwinMap() {
     const cum = cumulative(geometry);
     let raf = 0;
     let shownBearing: number | null = null;
+    let lastProgress = -1;
     const place = () => {
       const nav = useNav.getState();
-      const along = alongRoute(geometry, cum, nav.active && nav.routeId === route.id ? nav.progressM : 0);
-      marker.setLngLat([along.position[1], along.position[0]]);
+      const progress = nav.active && nav.routeId === route.id ? nav.progressM : 0;
+      const along = alongRoute(geometry, cum, progress);
+      if (progress !== lastProgress) {
+        marker.setLngLat([along.position[1], along.position[0]]);
+        lastProgress = progress;
+      }
       // Damp the heading the same way the camera does, so the two do not disagree
       // by a few degrees every frame on a curving street.
       if (shownBearing === null) shownBearing = along.bearing;
       else shownBearing += (((along.bearing - shownBearing + 540) % 360) - 180) * (reduceMotion ? 1 : 0.18);
       inner.style.transform = `rotate(${shownBearing}deg)`;
-      raf = requestAnimationFrame(place);
+      if (nav.active && nav.routeId === route.id) raf = requestAnimationFrame(place);
     };
     marker.addTo(map);
     raf = requestAnimationFrame(place);
@@ -772,7 +793,7 @@ export default function TwinMap() {
       marker.remove();
       if (arrowMarker.current === marker) arrowMarker.current = null;
     };
-  }, [ready, compare, selected, reduceMotion]);
+  }, [ready, compare, selected, reduceMotion, navActive, navRouteId]);
 
   // ───────── bus stops ─────────
   // Only while the bus is in play. Ninety-eight dots over a walking route would be
@@ -813,11 +834,14 @@ export default function TwinMap() {
     });
   }, [ready, pois.data, compare, selected]);
 
-  // ───────── routes (recoloured continuously with the timeline) ─────────
+  // Route geometry changes only when planning or selecting, not during playback.
   useEffect(() => {
     const map = ready;
     if (!ready || !map) return;
     const routes = compare?.routes ?? [];
+    const time = useMap.getState().timeMin;
+    map.removeFeatureState({ source: "route-seg" });
+    segmentColors.current.clear();
     const order = [...routes].sort((a, b) => (a.id === selected ? 1 : 0) - (b.id === selected ? 1 : 0));
     (map.getSource("routes") as maplibregl.GeoJSONSource).setData({
       type: "FeatureCollection",
@@ -830,12 +854,29 @@ export default function TwinMap() {
     (map.getSource("route-seg") as maplibregl.GeoJSONSource).setData({
       type: "FeatureCollection",
       features: order.flatMap((r) =>
-        r.segments.map((s) => ({
+        r.segments.map((s, i) => ({
           type: "Feature" as const,
-          properties: { c: heatColor(atTime(s.feels, timeMin)), sel: r.id === selected },
+          id: `${r.id}:${i}`,
+          properties: { c: heatColor(atTime(s.feels, time)), sel: r.id === selected },
           geometry: { type: "LineString" as const, coordinates: s.coords.map(([la, lo]) => [lo, la]) },
         })),
       ),
+    });
+  }, [ready, compare, selected]);
+
+  // Only update paint state during the timeline; avoid repeatedly serialising and
+  // sending the entire route geometry to MapLibre's worker.
+  useEffect(() => {
+    const map = ready;
+    if (!map) return;
+    const routes = compare?.routes ?? [];
+    for (const route of routes) route.segments.forEach((segment, i) => {
+      const id = `${route.id}:${i}`;
+      const color = heatColor(atTime(segment.feels, timeMin));
+      if (segmentColors.current.get(id) !== color) {
+        map.setFeatureState({ source: "route-seg", id }, { c: color });
+        segmentColors.current.set(id, color);
+      }
     });
     // score chips
     const seen = new Set<string>();

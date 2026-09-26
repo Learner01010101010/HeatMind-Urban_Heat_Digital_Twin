@@ -14,7 +14,7 @@ export default function ModeToggle({ compact = false }: { compact?: boolean }) {
         onClick={() => set({ mode: twin ? "map" : "twin" })}
         className="press grid place-items-center w-11 h-11 rounded-full"
         style={twin ? { background: "linear-gradient(135deg, rgba(251,138,31,.95), rgba(239,68,68,.9))" } : undefined}
-        aria-label={twin ? "Switch to Map" : "Switch to Heat Twin (3D)"}
+        aria-label={twin ? "Switch to 2D Map" : "Switch to Heat Twin (3D)"}
         aria-pressed={twin}
       >
         <Box size={18} className={twin ? "text-white" : "text-ink-200"} />
@@ -22,8 +22,8 @@ export default function ModeToggle({ compact = false }: { compact?: boolean }) {
     );
   }
   const items = [
-    { id: "map" as const, label: "Map", icon: MapIcon },
-    { id: "twin" as const, label: "Heat Twin", icon: Box },
+    { id: "map" as const, label: "2D Map", icon: MapIcon },
+    { id: "twin" as const, label: "3D Twin", icon: Box },
   ];
   return (
     <div className="glass relative flex h-11 rounded-full p-1" role="tablist" aria-label="View mode">

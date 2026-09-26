@@ -112,6 +112,7 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
   private twinMode = false;
   private grow = 0;
   private growTarget = 0;
+  private heavyBuilt = false;
   private plantGrow = 1;
   private lastMarchMs = 0;
   // Last values pushed to the GPU, so an unchanged frame pushes nothing.
@@ -181,7 +182,8 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     // with the map frozen behind a spinner. Staging them changes nothing about what
     // is built, only when, so the scene ends up identical either way -- but the map
     // is interactive throughout and fills in rather than appearing all at once.
-    this.buildDeferred(exposure, reveal);
+    // 2D needs the heat field, but not millions of hidden 3D vertices.
+    // Build the city only when the user first enters the 3D view.
     this.applySun();
     // Development hook: lets the render pipeline be inspected and the GPU exposure
     // field compared against the backend's shade grid from the console. Not wired to
@@ -279,7 +281,7 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
    * freezing on a 2.85-million-vertex allocation.
    */
   private scheduleCorridorRebuild() {
-    if (this.rebuildTimer !== null || this.disposed) return;
+    if (this.rebuildTimer !== null || this.disposed || !this.heavyBuilt || !this.twinMode) return;
     this.rebuildTimer = window.setTimeout(() => {
       this.rebuildTimer = null;
       if (this.disposed || !this.exposurePass || !this.reveal) return;
@@ -295,6 +297,8 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
 
   /** Tear down just the corridor-scoped layers, leaving ground, pins and beacons. */
   private disposeHeavy() {
+    if (this.buildRaf) cancelAnimationFrame(this.buildRaf);
+    this.buildRaf = 0;
     for (const [obj, layer] of [
       [this.buildings?.mesh, this.buildings],
       [this.roads?.mesh, this.roads],
@@ -317,6 +321,8 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
   }
 
   private buildDeferred(exposure: THREE.Texture, reveal: THREE.Texture) {
+    this.heavyBuilt = true;
+    this.builtCoverage = this.reveal.coverage;
     const only = this.corridorFeatures();
     const stages: (() => void)[] = [
       () => {
@@ -380,6 +386,7 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
   onRemove() {
     this.disposed = true;
     if (this.buildRaf) cancelAnimationFrame(this.buildRaf);
+    if (this.rebuildTimer !== null) clearTimeout(this.rebuildTimer);
     this.exposurePass?.dispose();
     this.roads?.dispose();
     this.landcover?.dispose();
@@ -518,7 +525,7 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
    * as [0, 0, 1, 1] — i.e. whole-world mercator, which is what LocalOrigin targets.
    */
   private syncCamera(args: maplibregl.CustomRenderMethodInput) {
-    this.camera.projectionMatrix = new THREE.Matrix4()
+    this.camera.projectionMatrix
       .fromArray(args.defaultProjectionData.mainMatrix as unknown as number[])
       .multiply(this.fields.origin.localToWorld);
   }
@@ -590,6 +597,10 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
 
   setMode(twin: boolean) {
     this.twinMode = twin;
+    if (twin && this.reveal && this.exposurePass && (!this.heavyBuilt || this.reveal.coverage > this.builtCoverage + 0.004)) {
+      if (this.heavyBuilt) this.disposeHeavy();
+      this.buildDeferred(this.exposurePass.target.texture, this.reveal.texture);
+    }
     this.growTarget = twin ? 1 : 0;
     this.ground?.setStyle({
       // Slightly lighter than the old raster overlay's 0.58: the ground now also

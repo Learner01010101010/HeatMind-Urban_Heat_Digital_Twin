@@ -1,7 +1,6 @@
 "use client";
 
 import { Crosshair, Footprints, LocateFixed, Map as MapIcon, Navigation, Square, X } from "lucide-react";
-import { useEffect } from "react";
 import {
   isSimulating,
   startSimulation,
@@ -36,7 +35,8 @@ export default function MyLocation({ compact = false }: { compact?: boolean }) {
   const set = useMap((s) => s.set);
   const navActive = useNav((s) => s.active);
   const navRouteId = useNav((s) => s.routeId);
-  const progressM = useNav((s) => s.progressM);
+  const progressM = useNav((s) => Math.floor(s.progressM));
+  const mode = useMap((s) => s.mode);
   const simSpeed = useNav((s) => s.simSpeed);
 
   // The route the trip simulation would run: whichever is selected, else the first.
@@ -52,8 +52,6 @@ export default function MyLocation({ compact = false }: { compact?: boolean }) {
   const bbox = meta.data?.zone.bbox;
   const centre = meta.data?.zone.center;
   const live = status === "inside" || status === "outside" || status === "simulated";
-
-  useEffect(() => () => stopSimulation(), []);
 
   const locate = () => {
     if (!bbox) return;
@@ -81,8 +79,8 @@ export default function MyLocation({ compact = false }: { compact?: boolean }) {
    */
   const runTrip = () => {
     if (!route) return;
-    set({ revealOn: true, mode: "twin", selectedRouteId: route.id });
-    startNavigation(route);
+    set({ revealOn: true, selectedRouteId: route.id });
+    startNavigation(route, { simulate: true });
     setOpen(false);
   };
 
@@ -194,7 +192,7 @@ export default function MyLocation({ compact = false }: { compact?: boolean }) {
                     <Navigation size={16} style={{ color: route?.color ?? "#6fbf5e" }} />
                     <span className="flex-1 min-w-0">
                       <div className="text-[13px] font-semibold text-ink-100">
-                        {route ? "Run the planned trip" : "Run the planned trip"}
+                        Run the planned trip in {mode === "twin" ? "3D" : "2D"}
                       </div>
                       <div className="text-[10.5px] text-ink-400 leading-tight">
                         {route

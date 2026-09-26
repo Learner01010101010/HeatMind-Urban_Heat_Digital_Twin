@@ -52,7 +52,8 @@ export function getFrame(
     }));
     p.catch(() => cache.delete(key));
     cache.set(key, p);
-    if (cache.size > 90) cache.delete(cache.keys().next().value!);
+    // Retain two complete forecasts, rather than ninety decoded city rasters.
+    if (cache.size > 26) cache.delete(cache.keys().next().value!);
   }
   return p;
 }

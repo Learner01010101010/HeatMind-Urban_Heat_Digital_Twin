@@ -37,6 +37,10 @@ export default function Timeline({ compact = false }: { compact?: boolean }) {
     let last = performance.now();
     const speed = reduce ? 60 : 22; // timeline minutes per real second
     const step = (t: number) => {
+      if (t - last < 1000 / 20) {
+        raf.current = requestAnimationFrame(step);
+        return;
+      }
       const dt = (t - last) / 1000;
       last = t;
       const next = useMap.getState().timeMin + dt * speed;

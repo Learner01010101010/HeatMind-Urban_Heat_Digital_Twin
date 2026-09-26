@@ -15,8 +15,8 @@
  * is identical at every setting; supersampling only sharpens the shadow's *edge*, so
  * a lower budget costs edge crispness and nothing else.
  *
- * Desktop budgets are deliberately set above what the current zone needs, so the
- * desktop render path is bit-identical to before this module existed.
+ * Supersampling and canvas density are bounded on desktop too: integrated GPUs
+ * need room for the moving camera and route overlays as well as the shadow pass.
  */
 
 export interface DeviceProfile {
@@ -38,8 +38,7 @@ export interface DeviceProfile {
    *
    * A phone at DPR 3 renders nine times the fragments of DPR 1, for a difference
    * most people cannot see on a 6-inch panel. Every fragment cost in the scene —
-   * ground heat, buildings, canopy, the lot — scales with this, so it is the single
-   * cheapest knob on mobile. Infinity leaves the browser's own value alone.
+   * ground heat, buildings, canopy, the lot — scales with this.
    */
   maxPixelRatio: number;
   /**
@@ -55,13 +54,12 @@ export interface DeviceProfile {
 
 const DESKTOP: DeviceProfile = {
   mobile: false,
-  // 6x the current 841x444 grid is 13.4 MP; this sits above it, so desktop keeps
-  // the exact factor it had and this cap never binds on today's zone.
-  maxExposurePixels: 16_000_000,
-  maxSupersample: 6,
-  maxPixelRatio: Infinity,
-  // Unchanged from the original 0.25-degree granularity.
-  sunStepDegScrub: 0.25,
+  // 3x the current grid is 3.36 MP, versus 13.44 MP at 6x. It still
+  // supersamples the same physics fields without changing heat or route scores.
+  maxExposurePixels: 4_000_000,
+  maxSupersample: 4,
+  maxPixelRatio: 2,
+  sunStepDegScrub: 1,
   sunStepDegRest: 0.25,
   treeBudget: [
     [0.6, Infinity],
@@ -75,7 +73,7 @@ const MOBILE: DeviceProfile = {
   mobile: true,
   // Sized so the integer factor lands on 3x for the current grid (3.4 MP, 13 MB):
   // still three times the physics resolution in each axis, and far finer than the
-  // 10 m raster the occluder heights come from, at a quarter of the desktop march.
+  // 10 m raster the occluder heights come from, at a quarter of the original 6x march.
   // The budget is what binds, not the factor, so a bigger zone steps down to 2x on
   // its own rather than quietly costing nine times more.
   maxExposurePixels: 3_600_000,

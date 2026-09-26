@@ -104,11 +104,23 @@ export function useFrameLoader() {
     const st = useFrames.getState();
     // keep showing the previous frames until new ones arrive, but tag the new key
     if (st.key !== key) useFrames.setState({ key });
-    TIMELINE.forEach((o, i) => {
-      getFrame(scenario, base, simOffset + o, tempDelta)
-        .then((f) => useFrames.getState().put(key, i, f))
-        .catch(() => {});
-    });
+    // Prioritise the visible frame and bound CPU/memory pressure on the backend.
+    // Previously all thirteen physics jobs ran at once, delaying route requests.
+    const nearest = Math.min(TIMELINE.length - 1, Math.round(useMap.getState().timeMin / 15));
+    const queue = [...new Set([nearest, 0, ...TIMELINE.map((_, i) => i)])];
+    let cancelled = false;
+    const load = async () => {
+      while (!cancelled && queue.length) {
+        const i = queue.shift()!;
+        try {
+          const f = await getFrame(scenario, base, simOffset + TIMELINE[i], tempDelta);
+          if (!cancelled) useFrames.getState().put(key, i, f);
+        } catch { /* Other keyframes can still load after a failed request. */ }
+      }
+    };
+    void load();
+    void load();
+    return () => { cancelled = true; };
   }, [scenario, base, simOffset, tempDelta]);
 }
 

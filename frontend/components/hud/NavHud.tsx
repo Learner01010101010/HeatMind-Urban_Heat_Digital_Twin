@@ -2,13 +2,13 @@
 
 import {
   ArrowUp, Bus, CornerUpLeft, CornerUpRight, Footprints, Hourglass, MapPin,
-  Navigation, RotateCcw, Sun, TriangleAlert, X,
+  Navigation, Pause, Play, RotateCcw, Sun, TriangleAlert, X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Route, RouteStep } from "@/lib/api";
 import { fmtDist } from "@/lib/heatColorScale";
-import { advance, cumulative, stepAt, stopNavigation, toStepScale, useNav } from "@/lib/navigation";
-import { useMap } from "@/lib/store";
+import { advance, cumulative, startNavigation, stepAt, stopNavigation, toStepScale, useNav } from "@/lib/navigation";
+import ModeToggle from "./ModeToggle";
 
 /** Maneuver → glyph. Slight and sharp turns reuse the corner arrows, rotated by CSS. */
 function ManeuverIcon({ step, size = 30 }: { step: RouteStep; size?: number }) {
@@ -47,7 +47,8 @@ function callout(metres: number): string {
  */
 export default function NavHud({ route }: { route: Route }) {
   const active = useNav((s) => s.active);
-  const progressM = useNav((s) => s.progressM);
+  const progressM = useNav((s) => Math.floor(s.progressM));
+  const paused = useNav((s) => s.paused);
   const live = useNav((s) => s.live);
   const offRouteM = useNav((s) => s.offRouteM);
   const simSpeed = useNav((s) => s.simSpeed);
@@ -68,9 +69,13 @@ export default function NavHud({ route }: { route: Route }) {
     last.current = performance.now();
     const tick = (t: number) => {
       const dt = Math.min(0.25, (t - last.current) / 1000);
+      if (t - last.current < 1000 / 30) {
+        raf.current = requestAnimationFrame(tick);
+        return;
+      }
       last.current = t;
       advance(route, geometry, cum, dt);
-      setNow(Date.now());
+      setNow((previous) => Date.now() - previous >= 1000 ? Date.now() : previous);
       raf.current = requestAnimationFrame(tick);
     };
     raf.current = requestAnimationFrame(tick);
@@ -151,7 +156,7 @@ export default function NavHud({ route }: { route: Route }) {
           <div className="text-[10.5px] text-ink-500 mt-1">arrival</div>
         </div>
         <div className="flex-1 min-w-0 text-right">
-          <div className={`text-[10.5px] ${live ? "text-emerald-300" : "text-ink-500"}`}>
+          <div role="status" className={`text-[10.5px] ${live ? "text-emerald-300" : "text-ink-500"}`}>
             {live ? "Following your position" : `Simulated · ${route.speed_kmh ?? 5} km/h`}
           </div>
           {/* Playback rate, only while the walk is simulated. A real trip moves at
@@ -183,6 +188,14 @@ export default function NavHud({ route }: { route: Route }) {
         </button>
       </div>
 
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 border-t border-white/[0.06]">
+        <ModeToggle />
+        {!live && <button type="button" onClick={() => arrived ? startNavigation(route, { simulate: true }) : useNav.getState().set({ paused: !paused })} aria-label={arrived ? "Replay trip simulation" : paused ? "Resume trip simulation" : "Pause trip simulation"} className="press flex items-center gap-1.5 rounded-full bg-white/[0.08] px-3 h-9 text-xs text-ink-100">
+          {arrived ? <RotateCcw size={14} /> : paused ? <Play size={14} /> : <Pause size={14} />}
+          {arrived ? "Replay" : paused ? "Resume" : "Pause"}
+        </button>}
+      </div>
+
       {/* ── progress ── */}
       <div className="h-1 bg-white/[0.06]">
         <div
@@ -197,14 +210,10 @@ export default function NavHud({ route }: { route: Route }) {
 /** The button that starts guidance. Placed with the route, not with the view controls. */
 export function StartNavButton({ route }: { route: Route }) {
   const active = useNav((s) => s.active);
-  const set = useMap((s) => s.set);
   if (active) return null;
   return (
     <button
       onClick={() => {
-        // Guidance is a 3D experience: the shadows the route was chosen for are only
-        // legible from street level, so entering the twin is part of starting.
-        set({ mode: "twin" });
         import("@/lib/navigation").then((m) => m.startNavigation(route));
       }}
       className="press flex items-center gap-2 rounded-full h-11 px-5 font-semibold text-[13.5px] text-ink-950"

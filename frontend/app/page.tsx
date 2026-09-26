@@ -24,7 +24,8 @@ import { runCompare } from "@/lib/actions";
 import { useFrameLoader, useHydrated } from "@/lib/hooks";
 import { INTERVENTION_STYLE } from "@/lib/interventionStyle";
 import { useClock, useMap, usePrefs, type PickMode } from "@/lib/store";
-import { useNav } from "@/lib/navigation";
+import { stopNavigation, useNav } from "@/lib/navigation";
+import { stopSimulation } from "@/lib/geolocation";
 import { useMedia } from "@/lib/useMedia";
 
 const TwinMap = dynamic(() => import("@/components/map/TwinMap"), { ssr: false, loading: () => <div className="absolute inset-0 bg-ink-950" /> });
@@ -61,13 +62,20 @@ export default function Home() {
     if (hydrated && !onboarded) router.replace("/onboarding");
   }, [hydrated, onboarded, router]);
 
+  // Own simulation cleanup at the page level: responsive location controls can
+  // unmount while a trip is running, without cancelling the position driver.
+  useEffect(() => () => {
+    stopSimulation();
+    stopNavigation();
+  }, []);
+
   // Live re-baselining: every 5 minutes the active trip is re-scored against the new "now".
   const lastBase = useRef(base);
   useEffect(() => {
     if (lastBase.current === base) return;
     lastBase.current = base;
     const m = useMap.getState();
-    if (m.origin && m.destination && !m.tempDelta && !m.simOffsetMin) void runCompare({ silent: true });
+    if (!useNav.getState().active && m.origin && m.destination && !m.tempDelta && !m.simOffsetMin) void runCompare({ silent: true });
   }, [base]);
 
   // Guidance takes the screen. Route comparison, the forecast scrubber and the
