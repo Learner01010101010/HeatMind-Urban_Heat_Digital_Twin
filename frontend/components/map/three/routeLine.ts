@@ -7,17 +7,16 @@ import { LIFT_GLSL, type LiftUniforms } from "./lift";
 /**
  * The planned route, drawn on the street in the twin.
  *
- * MapLibre draws the route perfectly well as a line layer — on the flat map. It
- * cannot draw it on a hill. Those layers live on the basemap plane at z = 0, and
- * once the twin started standing the ground on real elevation the street under
- * Narhe rose 70 m while the route stayed on the floor: from a pitched camera the
- * line no longer sat on the road, and anywhere the ground rose in front of it the
- * hillside simply covered it up.
+ * MapLibre draws the route perfectly well as a line layer — on flat ground. Those
+ * layers live on the basemap plane at z = 0, and the twin's ground does not always
+ * stay there: with the vulnerability overlay up, the whole scene rides relief up to
+ * 38 m, and a route painted on the basemap sinks under the streets it describes.
  *
  * So in the twin the route is geometry like everything else — a ribbon through the
- * same shared lift the roads use, riding the same terrain by construction rather
- * than by a constant that has to be kept in sync. The flat map keeps its line
- * layers; they are exactly right there, and they are hidden while the twin is up.
+ * same shared lift the roads use, following whatever that lift does by construction
+ * rather than by a constant that has to be kept in sync. The flat map keeps its
+ * line layers; they are exactly right there, and they are hidden while the twin is
+ * up. With the overlay off the lift is zero and the ribbon simply lies on the road.
  *
  * Deliberately not subject to the corridor reveal. Every other layer fades in as you
  * approach it, because the twin only claims to know the ground it has drawn. The

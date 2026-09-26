@@ -77,8 +77,6 @@ export interface TwinFields {
   road: THREE.DataTexture;
   /** time-invariant half of the SDG-10 vulnerability index, index points = texel * 55 */
   vulnStatic: THREE.DataTexture;
-  /** Real ground elevation, 16 bits across two planes. Null when the DEM is absent. */
-  terrain: { hi: THREE.DataTexture; lo: THREE.DataTexture; spanM: number; minM: number; maxM: number } | null;
   raw: { height: Uint8Array; canopy: Uint8Array; svf: Uint8Array; surface: Uint8Array };
   dispose(): void;
 }
@@ -116,19 +114,6 @@ function build(f: ZoneFields): TwinFields {
     vulnStatic: r8(vulnStatic, cols, rows, true),
   };
 
-  // Ground elevation. Optional: the twin was built flat and stays that way if the
-  // DEM has not been fetched, rather than failing to load at all.
-  const terrain =
-    f.terrain?.available && f.terrain_hi_b64 && f.terrain_lo_b64
-      ? {
-          hi: r8(decodeFlipped(f.terrain_hi_b64, rows, cols), cols, rows, true),
-          lo: r8(decodeFlipped(f.terrain_lo_b64, rows, cols), cols, rows, true),
-          spanM: (f.terrain.max_m ?? 0) - (f.terrain.min_m ?? 0),
-          minM: f.terrain.min_m ?? 0,
-          maxM: f.terrain.max_m ?? 0,
-        }
-      : null;
-
   return {
     rows,
     cols,
@@ -136,12 +121,9 @@ function build(f: ZoneFields): TwinFields {
     heightScaleM: f.height_scale_m,
     origin: new LocalOrigin(f.origin),
     ...tex,
-    terrain,
     raw: { height, canopy, svf, surface },
     dispose() {
       Object.values(tex).forEach((t) => t.dispose());
-      terrain?.hi.dispose();
-      terrain?.lo.dispose();
     },
   };
 }
