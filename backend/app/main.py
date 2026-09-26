@@ -19,7 +19,6 @@ from .routers import (community, equity, heat, open_data, passport, photo, plann
 from .services.heat_twin_service import get_twin
 from .services.modes import table as travel_modes_table
 from .services.risk_scoring import weights_table
-from .services import terrain as terrain_service
 from .services.transit import describe as transit_describe
 from .services.route_planner import get_planner
 from .services.weather import base_time, weather_service
@@ -173,9 +172,4 @@ def zone_fields():
         "surface_b64": base64.b64encode(z.surface.astype(np.uint8).tobytes()).decode(),
         "road_b64": base64.b64encode((z.road.astype(np.uint8) * 255).tobytes()).decode(),
         "vuln_static_b64": u8(equity_service.static_vulnerability(), equity_service.STATIC_MAX),
-        # Ground elevation, if it has been fetched. Optional by design: the twin was
-        # complete on a plane, so a missing raster leaves it flat rather than 500ing.
-        "terrain": terrain_service.describe(),
-        **(lambda p: {"terrain_hi_b64": p[0], "terrain_lo_b64": p[1]} if p else {})(
-            terrain_service.planes_b64()),
     }

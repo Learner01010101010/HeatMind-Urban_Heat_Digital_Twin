@@ -2,7 +2,6 @@
 
 import * as THREE from "three";
 import { makeFrameTexture, makeLutTexture, uploadFrame, type TwinFields } from "./fields";
-import { LIFT_GLSL, type LiftUniforms } from "./lift";
 import { REVEAL_GLSL } from "./reveal";
 
 /**
@@ -26,19 +25,9 @@ import { REVEAL_GLSL } from "./reveal";
  */
 const VERT = `
 varying vec2 vUv;
-${LIFT_GLSL}
 void main() {
   vUv = uv;
-  // The heat plane has to ride the terrain like everything standing on it.
-  //
-  // It did not, and it was the one layer that did not: roads, landcover, canopy and
-  // buildings all rose with the ground while the coloured surface stayed on the
-  // basemap. On a hillside that puts the heat field tens of metres BELOW the street
-  // it is describing, so zooming in showed the dark basemap through the gap and the
-  // ground read as half transparent.
-  vec3 p = position;
-  p.z += liftAt(clamp(uv, 0.0, 1.0));
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }`;
 
 const FRAG = `
@@ -131,8 +120,7 @@ export class GroundHeat {
     this.mesh.visible = on;
   }
 
-  constructor(private readonly fields: TwinFields, exposure: THREE.Texture, reveal: THREE.Texture,
-              lift: LiftUniforms) {
+  constructor(private readonly fields: TwinFields, exposure: THREE.Texture, reveal: THREE.Texture) {
     this.texA = makeFrameTexture(fields.cols, fields.rows);
     this.texB = makeFrameTexture(fields.cols, fields.rows);
 
@@ -157,7 +145,6 @@ export class GroundHeat {
         uShadeStrength: { value: 0.8 },
         uReveal: { value: reveal },
         uRevealOn: { value: 0 },
-        ...lift,
       },
       transparent: true,
       depthWrite: false,
@@ -167,13 +154,7 @@ export class GroundHeat {
     });
 
     const { widthM, heightM } = fields.origin;
-    // Subdivided, because a displaced surface can only follow ground it has vertices
-    // on: as two triangles this plane could tilt but never take the shape of a hill.
-    // One quad per 4 physics cells matches the vulnerability relief and costs ~23k
-    // vertices over the whole zone, which is nothing beside the building mesh.
-    const segX = Math.max(1, Math.round(fields.cols / 4));
-    const segY = Math.max(1, Math.round(fields.rows / 4));
-    const geo = new THREE.PlaneGeometry(widthM, heightM, segX, segY);
+    const geo = new THREE.PlaneGeometry(widthM, heightM, 1, 1);
     this.mesh = new THREE.Mesh(geo, this.material);
     this.mesh.position.set(widthM / 2, heightM / 2, 0.05); // just clear of the basemap
     this.mesh.renderOrder = 1;

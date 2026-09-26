@@ -322,17 +322,6 @@ export interface ZoneFields {
   surface_b64: string;
   road_b64: string;
   vuln_static_b64: string;
-  /** Ground elevation. Absent when the DEM has not been fetched — the twin stays flat. */
-  terrain?: {
-    available: boolean;
-    min_m?: number;
-    max_m?: number;
-    relief_m?: number;
-    source?: string;
-    surface_removed_p95_m?: number | null;
-  };
-  terrain_hi_b64?: string;
-  terrain_lo_b64?: string;
 }
 
 /** Render typology for a footprint — from OSM where tagged, inferred otherwise. */

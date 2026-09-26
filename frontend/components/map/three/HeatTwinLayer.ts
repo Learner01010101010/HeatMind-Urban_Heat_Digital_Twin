@@ -151,13 +151,9 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     this.reveal = new RevealField(this.fields);
     const reveal = this.reveal.texture;
 
-    // The lift comes first now, because the ground plane rides the terrain too and
-    // so needs these uniforms at material-creation time. Its heat keyframes are
-    // pointed at immediately afterwards: the uniform objects are shared by
-    // reference, so filling them in here reaches every material that holds them,
-    // including the ground's own.
-    this.lift = makeLiftUniforms(this.fields.vulnStatic, this.fields.terrain);
-    this.ground = new GroundHeat(this.fields, exposure, reveal, this.lift);
+    // Built before the lifted layers so its heat keyframes exist to point them at.
+    this.ground = new GroundHeat(this.fields, exposure, reveal);
+    this.lift = makeLiftUniforms(this.fields.vulnStatic);
     this.lift.uLiftHeatA.value = this.ground.heatTextures.a;
     this.lift.uLiftHeatB.value = this.ground.heatTextures.b;
 
@@ -420,8 +416,8 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     this.signals?.setGrow(this.grow);
     this.beacons?.setGrow(this.grow);
     // The 3D route ribbon belongs to the twin only. On the flat map MapLibre's own
-    // line layers come back, and leaving this one up would draw a second route
-    // floating at terrain height over the first.
+    // line layers come back, and leaving this one up would draw a second route over
+    // the first.
     this.routeLine?.setVisible(this.grow > 0.002);
 
     // Keep the route's temperature profile readable as the camera pulls back.
@@ -682,67 +678,6 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     if (records.length) this.routeLine.set(records);
     else this.routeLine.clear();
     this.map?.triggerRepaint();
-  }
-
-  /**
-   * Ground height at a point, in metres above the zone's floor.
-   *
-   * For the HTML markers. Everything drawn inside this scene rides the terrain
-   * through the shared lift in its own vertex shader, but a MapLibre Marker is a DOM
-   * element positioned from a lng/lat at z = 0 — it has no way to know the ground
-   * moved. With the twin standing on real elevation that leaves every water dot, POI
-   * and route pin buried in the hillside it is supposed to be sitting on.
-   *
-   * So the map reads the height from here and nudges the marker up the screen by it.
-   * Returns 0 when no DEM is loaded, which is the flat case and correct.
-   */
-  elevationAt(lat: number, lon: number): number {
-    const t = this.fields.terrain;
-    if (!t) return 0;
-    const [x, y] = this.fields.origin.toXY(lat, lon);
-    const c = Math.round(x / this.fields.cellM - 0.5);
-    // The planes are stored GL-side-up, row 0 at the south edge.
-    const r = Math.round(y / this.fields.cellM - 0.5);
-    if (c < 0 || r < 0 || c >= this.fields.cols || r >= this.fields.rows) return 0;
-    const i = r * this.fields.cols + c;
-    const hi = t.hi.image.data as Uint8Array;
-    const lo = t.lo.image.data as Uint8Array;
-    return ((hi[i] * 256 + lo[i]) / 65535) * t.spanM;
-  }
-
-  /**
-   * How far up the screen a point at this location sits once it is on the terrain.
-   *
-   * Returns the pixel offset between the point drawn on the basemap plane and the
-   * same point drawn on the ground the twin actually renders — which is exactly what
-   * an HTML marker has to be shifted by to stand on that ground.
-   *
-   * Computed with the layer's own camera rather than from pitch and metres-per-pixel.
-   * The hand-rolled version was wrong twice: first with cos where it needed sin, then
-   * still short, because a perspective camera does not scale a vertical offset by a
-   * function of pitch alone — how many pixels a metre of height is worth depends on
-   * how far the point is from the eye, and across a 9 km corridor that varies by a
-   * lot. Projecting the same two points through the same matrix that draws the
-   * terrain cannot disagree with the terrain.
-   */
-  screenLiftPx(lat: number, lon: number): { dx: number; dy: number } {
-    const h = this.elevationAt(lat, lon);
-    if (h <= 0 || !this.map) return { dx: 0, dy: 0 };
-    const [x, y] = this.fields.origin.toXY(lat, lon);
-    const m = this.camera.projectionMatrix;
-    const cv = this.map.getCanvas();
-    const w = cv.clientWidth || cv.width;
-    const ht = cv.clientHeight || cv.height;
-
-    const at = (z: number) => {
-      const v = new THREE.Vector4(x, y, z, 1).applyMatrix4(m);
-      if (v.w <= 0) return null; // behind the camera
-      return { sx: ((v.x / v.w) * 0.5 + 0.5) * w, sy: (0.5 - (v.y / v.w) * 0.5) * ht };
-    };
-    const g = at(0);
-    const p = at(h);
-    if (!g || !p) return { dx: 0, dy: 0 };
-    return { dx: p.sx - g.sx, dy: p.sy - g.sy };
   }
 
   /** How many pins are currently standing (for the development hook). */
