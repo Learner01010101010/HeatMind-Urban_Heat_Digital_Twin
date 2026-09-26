@@ -723,9 +723,12 @@ export default function TwinMap() {
   // it is meant to be standing on.
   //
   // So they are nudged up the screen by however many pixels their own ground height
-  // works out to. A vertical offset in a pitched perspective view projects to screen
-  // Y scaled by cos(pitch) — exact enough at these heights, and it costs one
-  // multiply per marker rather than a projection matrix.
+  // works out to. The scale factor is sin(pitch), not cos: looking straight down
+  // (pitch 0) a vertical offset moves nothing on screen at all, and the nearer the
+  // camera gets to the horizon the more of that height you see. Getting it the wrong
+  // way round applied less than half the needed lift at the twin's 62-66 degrees —
+  // and the error grows as you zoom in, because the same metres are worth more
+  // pixels, which is exactly when the dots sank back under the ground.
   //
   // Runs on move, zoom and pitch because all three change the conversion, and each
   // marker's own anchoring offset is preserved rather than overwritten.
@@ -761,7 +764,7 @@ export default function TwinMap() {
             continue;
           }
           const mpp = (156543.03392 * Math.cos((m.getLngLat().lat * Math.PI) / 180)) / Math.pow(2, zoom);
-          m.setOffset([base[0], base[1] - (h / mpp) * Math.cos(pitch)]);
+          m.setOffset([base[0], base[1] - (h / mpp) * Math.sin(pitch)]);
         }
       }
     };
