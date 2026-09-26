@@ -1,6 +1,6 @@
 "use client";
 
-import { HeartPulse, LifeBuoy, Map as MapIcon } from "lucide-react";
+import { FlaskConical, HeartPulse, LifeBuoy, Map as MapIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useNav } from "@/lib/navigation";
@@ -15,6 +15,7 @@ import CityOpsAdvisory, { CityOpsToggle } from "@/components/hud/CityOpsAdvisory
 const ITEMS = [
   { href: "/", label: "Twin", icon: MapIcon },
   { href: "/passport", label: "Heat Passport", icon: HeartPulse },
+  { href: "/city-lab", label: "City Lab", icon: FlaskConical },
 ];
 
 /** Top-level navigation, visible on every screen (top pill on desktop, tab bar on phones).
@@ -40,12 +41,13 @@ export default function GlobalNav() {
               key={it.href}
               href={it.href}
               aria-current={on ? "page" : undefined}
-              className={`press flex items-center gap-2 h-10 rounded-full px-3.5 text-[13px] font-medium transition-colors ${on ? "bg-white/[0.12] text-ink-100" : "text-ink-300 hover:text-ink-100 hover:bg-white/[0.05]"}`}
+              className={`press ${it.href === "/city-lab" ? "hidden xl:flex" : "flex"} items-center gap-2 h-10 rounded-full px-3.5 text-[13px] font-medium transition-colors ${on ? "bg-white/[0.12] text-ink-100" : "text-ink-300 hover:text-ink-100 hover:bg-white/[0.05]"}`}
               title={it.label}
             >
               <it.icon size={16} />
               <span className="hidden 2xl:inline">{it.label}</span>
               {it.href === "/passport" && <span className="2xl:hidden">Passport</span>}
+              {it.href === "/city-lab" && <span className="2xl:hidden">City Lab</span>}
             </Link>
           );
         })}
@@ -60,6 +62,8 @@ export default function GlobalNav() {
           <span className="2xl:hidden">SOS</span>
         </button>
       </nav>
+
+      <Link href="/city-lab" aria-current={isOn("/city-lab") ? "page" : undefined} className="hidden md:flex xl:hidden fixed right-5 top-[84px] z-[60] glass rounded-full px-4 py-2.5 items-center gap-2 text-xs text-[#8ad8b0] border border-[#8ad8b0]/20"><FlaskConical size={16} />City Lab</Link>
 
       <nav
         className="md:hidden fixed bottom-0 inset-x-0 z-[60] flex items-stretch h-[calc(56px+env(safe-area-inset-bottom))] pb-[env(safe-area-inset-bottom)] bg-ink-950/85 backdrop-blur-2xl border-t border-white/[0.06]"

@@ -14,7 +14,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 
 from .config import ALLOWED_ORIGINS, ANTHROPIC_API_KEY, BBOX, CENTER, COLOR_MAX_C, COLOR_MIN_C, ZONE_CITY, ZONE_NAME
 from .db.session import init_db
-from .routers import (community, equity, heat, open_data, passport, photo, planner, pois, risk,
+from .routers import (city_lab, community, equity, heat, open_data, passport, photo, planner, pois, risk,
                       routes, shadow, transit)
 from .services.heat_twin_service import get_twin
 from .services.modes import table as travel_modes_table
@@ -49,7 +49,7 @@ app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_methods=
 
 for r in (heat.router, shadow.router, pois.router, routes.router, risk.router, passport.router,
           equity.router, planner.router, community.router, open_data.router, photo.router,
-          transit.router):
+          transit.router, city_lab.router):
     app.include_router(r)
 
 

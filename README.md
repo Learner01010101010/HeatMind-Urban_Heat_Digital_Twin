@@ -235,6 +235,31 @@ Gemini trip tips are opt-in, use one bounded request, and never change the route
 Validation: `python -m unittest discover -s tests -v` from `backend/`; `npm run build`
 and targeted ESLint from `frontend/`.
 
+## City Lab demonstrations
+
+Open **City Lab** in the website navigation (`/city-lab`). Cooling investment
+offers three mapped neighbourhoods, a separate 1:30 PM heatwave demo or current
+conditions, editable INR cost assumptions, manual project selection and a greedy
+budget proposal. Tree canopy, pavement and shade use the existing intervention
+simulator at separated sites. Before/after temperatures are weighted averages
+over evaluated patches, not a citywide reduction or a population-impact estimate.
+Water refills are proposed access points only, with no temperature benefit assumed.
+Trees assume mature canopy; costs are demonstrations, not deployment quotations.
+Exported proposals include these assumptions. Nothing modifies routes or the twin.
+
+Sensor validation shows paired observations, a scatter plot, MAE, RMSE, signed
+bias and share within a chosen tolerance. The synthetic demo is explicitly
+labelled and cannot establish accuracy. Real comparisons accept a CSV with
+`lat,lon,time,metric,observed_c` and optional `predicted_c,label`; timestamps need a
+timezone, coordinates must be in the zone and each file must use one metric
+(`surface_c`, `air_c` or `feels_c`). Up to 60 readings / 60 KB are accepted.
+Download the live prediction template to save model references, then fill observed
+values from comparable measurements at those locations and times. Without saved
+predictions, only the last 24 hours with matching weather can be reconstructed;
+this is not an archived forecast. Uploaded references are user-supplied, not
+independently verified. Data is compared in memory and never recalibrates the
+model. Exported synthetic results retain their demo label if imported again.
+
 ## Stack
 
 Next.js 16 (App Router) · Tailwind CSS v4 · MapLibre GL 6 · Zustand · lucide-react · Geist — FastAPI · NumPy · httpx · SQLite.
