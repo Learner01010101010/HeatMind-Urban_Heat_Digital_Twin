@@ -30,6 +30,12 @@ TRANSIT_COLOR = "#5bb8d4"
 POI_RADIUS_M = 45.0
 SEGMENT_M = 24.0
 
+#: Senior Mode rest-amenity bias. How near a bench or toilet a piece of street has
+#: to be to count, and the most the heat penalty may be discounted for it.
+REST_NEAR_M = 50.0
+REST_RELIEF = 0.33
+REST_DETAILS = frozenset({"bench", "toilets"})
+
 
 class RoutePlanner:
     def __init__(self) -> None:
@@ -40,8 +46,37 @@ class RoutePlanner:
         self.poi_xy = np.array([geo.to_xy(p["lat"], p["lon"]) for p in pois]) if pois else np.zeros((0, 2))
         self.road_names = [r["name"] for r in self.twin.zone.data["roads"]]
         self.road_hw = [r["highway"] for r in self.twin.zone.data["roads"]]
+        self._rest_mask: np.ndarray | None = None
         self._store: OrderedDict[str, dict] = OrderedDict()
         self._lock = threading.Lock()
+
+    # ------------------------------------------------------------------
+
+    def _rest_proximity(self) -> np.ndarray:
+        """Per-piece 0/1: is there a mapped bench or toilet within REST_NEAR_M?
+
+        Cached on the planner: it is a pure function of the POI set and the street
+        graph, and neither changes after startup.
+
+        Mapped amenities only. Most of this zone's POI set is seeded, and a bench
+        that is not there is worse than no bench at all for someone who chose a
+        longer route on the strength of it.
+        """
+        if self._rest_mask is not None:
+            return self._rest_mask
+        mid = self.graph.p_mid
+        mask = np.zeros(len(mid), dtype=float)
+        for poi in self.pois:
+            if (poi.get("detail") or "").lower() not in REST_DETAILS or poi.get("source") != "osm":
+                continue
+            x, y = geo.to_xy(poi["lat"], poi["lon"])
+            near = (np.abs(mid[:, 0] - x) <= REST_NEAR_M) & (np.abs(mid[:, 1] - y) <= REST_NEAR_M)
+            if near.any():
+                idx = np.where(near)[0]
+                d = np.hypot(mid[idx, 0] - x, mid[idx, 1] - y)
+                mask[idx[d <= REST_NEAR_M]] = 1.0
+        self._rest_mask = mask
+        return mask
 
     # ------------------------------------------------------------------
 
@@ -88,7 +123,8 @@ class RoutePlanner:
 
     def compare(self, *, origin: tuple[float, float], destination: tuple[float, float], persona: str,
                 scenario: str, depart: datetime, temp_delta: float = 0.0, extra_paths: list[Path] | None = None,
-                compare_id: str | None = None, mode: str | None = None) -> dict:
+                compare_id: str | None = None, mode: str | None = None,
+                senior: bool = False) -> dict:
         if persona not in PERSONAS:
             raise ValueError(f"unknown persona '{persona}'")
         P = PERSONAS[persona]
@@ -129,6 +165,20 @@ class RoutePlanner:
         # cooler route, just a longer one.
         ref = max(CAUTION_C - P["vulnerability_shift_c"], float(np.percentile(feels_t, 10)))
         penalty = (np.clip(feels_t - ref, 0, None) / 4 + 0.6 * expo_t * inten_t) * street_mode.heat_exposure
+
+        # Senior Mode: bias the search toward streets with somewhere to sit.
+        #
+        # Multiplied into the heat penalty rather than added beside it, so it can only
+        # ever discount a street the heat term was already pricing -- it cannot drag a
+        # route onto a hot road because there is a bench on it. Combined with heat, as
+        # asked, and bounded: a third off at most.
+        #
+        # Be clear about the ceiling on this. The zone carries six mapped benches and
+        # no mapped toilets across 37 km2, so on most trips this changes nothing at
+        # all. It is wired to the real OSM amenities rather than to invented ones
+        # precisely so that the day the mapping improves, the routing does too.
+        if senior:
+            penalty = penalty * (1.0 - REST_RELIEF * self._rest_proximity())
 
         paths = g.candidate_paths(src, dst, piece_seconds, penalty, mode=street_mode)
         if not paths:

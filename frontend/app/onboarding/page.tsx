@@ -30,6 +30,7 @@ export default function Onboarding() {
   const router = useRouter();
   const persona = usePrefs((s) => s.persona);
   const units = usePrefs((s) => s.units);
+  const seniorMode = usePrefs((s) => s.seniorMode);
   const set = usePrefs((s) => s.set);
   const [sample, setSample] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -119,7 +120,40 @@ export default function Onboarding() {
         <section className="bg-ink-900/90 border border-white/[0.08] rounded-3xl p-5 md:p-6">
           <h2 className="font-extrabold text-lg text-ink-100">Who&apos;s heading out?</h2>
           <p className="text-[13px] text-ink-400 mb-4">Identical heat isn&apos;t equally risky for everyone. Your persona sets how the risk engine weighs each factor.</p>
-          <PersonaSelector value={persona} onChange={(p) => set({ persona: p })} />
+          <PersonaSelector
+            value={persona}
+            onChange={(p) => set({ persona: p, ...(p === "senior" ? { seniorMode: true } : {}) })}
+          />
+
+          {/* Senior Mode is chosen here and only here. It changes which vehicles are
+              offered, when a route is called out as too hot, what the SOS button
+              does and how routes are scored — all of which someone should be opting
+              into deliberately at the start, not discovering behind a toggle in the
+              middle of a trip. Picking the Senior persona turns it on; it can be
+              turned back off, because the two are not the same claim. */}
+          <div className="mt-5">
+            <div className="text-[12px] font-bold text-ink-300 mb-2">Mode</div>
+            <div className="flex rounded-2xl bg-ink-950 p-1 gap-1" role="radiogroup" aria-label="App mode">
+              {([false, true] as const).map((v) => (
+                <button
+                  key={String(v)}
+                  role="radio"
+                  aria-checked={seniorMode === v}
+                  onClick={() => set({ seniorMode: v })}
+                  className={`flex-1 rounded-xl px-3 py-2.5 text-left transition-colors ${seniorMode === v ? "bg-white/[0.1]" : "hover:bg-white/[0.04]"}`}
+                >
+                  <span className={`block text-[13.5px] font-bold ${seniorMode === v ? "text-ink-100" : "text-ink-300"}`}>
+                    {v ? "Senior" : "Standard"}
+                  </span>
+                  <span className="block text-[11.5px] text-ink-400 leading-snug mt-0.5">
+                    {v
+                      ? "Larger text, walk/car/bus only, earlier heat warnings, rest stops preferred"
+                      : "Everything on, all travel modes"}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
 
           <div className="mt-5 grid sm:grid-cols-2 gap-3">
             <div className="rounded-2xl bg-white/[0.03] border border-white/[0.07] p-3">

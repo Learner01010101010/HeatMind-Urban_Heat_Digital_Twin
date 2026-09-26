@@ -18,7 +18,7 @@ export async function runCompare(opts: { silent?: boolean } = {}) {
   try {
     const base = useClock.getState().base;
     // A fresh comparison always starts from real (un-simulated) conditions at the live time.
-    const r = await api.compare({ origin: m.origin, destination: m.destination, persona: p.persona, mode: p.mode, scenario: SCENARIO, depart_at: base });
+    const r = await api.compare({ origin: m.origin, destination: m.destination, persona: p.persona, mode: p.mode, senior: p.seniorMode, scenario: SCENARIO, depart_at: base });
     if (my !== seq) return;
     const cur = useMap.getState();
     const prevLabel = cur.compare?.routes.find((x) => x.id === cur.selectedRouteId)?.label;

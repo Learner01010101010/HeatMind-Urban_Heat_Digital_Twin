@@ -695,6 +695,8 @@ export const api = {
     depart_at?: string;
     temp_delta_c?: number;
     mode?: TravelMode;
+    /** Senior Mode: prefer streets with a mapped bench or toilet within 50 m. */
+    senior?: boolean;
   }) => req<CompareResult>("/api/routes/compare", { method: "POST", json: body }),
   busStops: () => req<GeoJSON.FeatureCollection<GeoJSON.Point, BusStop>>("/api/transit/stops"),
   simulate: (body: { compare_id: string; route_id?: string; simulate: { time_offset_min: number; temp_delta_c: number } }) =>
