@@ -103,6 +103,13 @@ export default function Home() {
             <div className="hidden md:block">
               <ModeSelector />
             </div>
+            {/* The route sheet belongs in this column, in flow, rather than pinned
+                to its own absolute top. It used to sit at top-[84px] — a constant
+                measured before the mode selector was added above it, which then
+                landed the sheet straight on top of the mode row and left only its
+                right edge showing. Stacking them means the two cannot collide
+                whatever either one's height turns out to be. */}
+            {wide && sheet}
           </div>
           <div className="pointer-events-auto ml-auto flex items-center gap-2.5">
             {/* The global nav is fixed to the centre of this same bar, so the view
@@ -123,9 +130,6 @@ export default function Home() {
           </div>
         </div>
       </div>
-
-      {/* ── desktop: routes dock on the LEFT, below search, out of the map's centre ── */}
-      {wide && sheet && <div className="absolute left-5 top-[84px] z-30">{sheet}</div>}
 
       {/* ── phone: one control rail on the right edge ──
            Grouped into a single surface rather than a column of free-floating

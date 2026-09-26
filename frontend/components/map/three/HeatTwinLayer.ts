@@ -147,7 +147,7 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
 
     // Built before the lifted layers so its heat keyframes exist to point them at.
     this.ground = new GroundHeat(this.fields, exposure, reveal);
-    this.lift = makeLiftUniforms(this.fields.vulnStatic);
+    this.lift = makeLiftUniforms(this.fields.vulnStatic, this.fields.terrain);
     this.lift.uLiftHeatA.value = this.ground.heatTextures.a;
     this.lift.uLiftHeatB.value = this.ground.heatTextures.b;
 

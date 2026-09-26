@@ -14,14 +14,22 @@
 // the signal, because any saturated red is intrinsically dark (green is 71% of
 // luma). The top stop is deliberately kept off true oxblood so the worst cells
 // still read against a near-black basemap instead of sinking into it.
+// The stops below are a re-tune, not a new scale: every boundary temperature and the
+// whole rationale above are unchanged. What changed is the middle, which was reading
+// muddy — 178,166,82 is an acid olive-gold, and between it and the sage below it the
+// twin spent its two most common daytime bands on two colours that argue with each
+// other and with the warm greys of the basemap. These are the same hues held back
+// toward the product's ink palette: chroma down, the yellow-green pulled out of the
+// mid, and the hot end off pure red so it still reads as a surface rather than a
+// warning light.
 export const HEAT_STOPS: [number, [number, number, number]][] = [
-  [20, [74, 80, 72]], // cool — near-neutral, sits back into the basemap
-  [27, [114, 126, 86]], // comfortable ceiling — muted olive
-  [32, [178, 166, 82]], // caution — olive gold
-  [39, [232, 162, 56]], // extreme caution — amber
-  [45, [241, 108, 44]], // orange
-  [52, [223, 52, 44]], // danger -> extreme danger — red
-  [56, [186, 30, 50]], // off the top of the scale — deep crimson
+  [20, [76, 82, 80]], // cool — near-neutral, sits back into the basemap
+  [27, [116, 130, 104]], // comfortable ceiling — muted sage
+  [32, [176, 170, 104]], // caution — soft gold
+  [39, [226, 164, 78]], // extreme caution — amber
+  [45, [226, 116, 60]], // burnt orange
+  [52, [208, 68, 56]], // danger -> extreme danger — red
+  [56, [168, 40, 50]], // off the top of the scale — deep crimson
 ];
 
 export const SCALE_MIN = HEAT_STOPS[0][0];

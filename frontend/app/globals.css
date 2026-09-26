@@ -23,13 +23,15 @@
   --color-sky-glow: #d4d2cf;
   --color-violet-glow: #d4d2cf;
 
-  --color-heat-0: #4a5048;
-  --color-heat-1: #727e56;
-  --color-heat-2: #b2a652;
-  --color-heat-3: #e8a238;
-  --color-heat-4: #f16c2c;
-  --color-heat-5: #ef4444;
-  --color-heat-6: #7f1d1d;
+  /* Mirrors HEAT_STOPS in lib/heatColorScale.ts — the two must not drift, or a
+     legend swatch stops matching the ground it describes. */
+  --color-heat-0: #4c5250;
+  --color-heat-1: #748268;
+  --color-heat-2: #b0aa68;
+  --color-heat-3: #e2a44e;
+  --color-heat-4: #e2743c;
+  --color-heat-5: #d04438;
+  --color-heat-6: #a82832;
 
   --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
@@ -40,7 +42,7 @@
 
 :root {
   color-scheme: dark;
-  --heat-gradient: linear-gradient(90deg, #4a5048 0%, #727e56 19.4%, #b2a652 33.3%, #e8a238 52.8%, #f16c2c 69.4%, #df342c 88.9%, #ba1e32 100%);
+  --heat-gradient: linear-gradient(90deg, #4c5250 0%, #748268 19.4%, #b0aa68 33.3%, #e2a44e 52.8%, #e2743c 69.4%, #d04438 88.9%, #a82832 100%);
 
   /* The fill for the two primary actions — play the forecast, and start a trip.
      Both referenced this variable while nothing defined it, so both rendered with
@@ -53,7 +55,12 @@
 
   /* Vulnerability relief runs cool-to-warm on its own ramp rather than the heat
      LUT: blue where the index is low, yellow where it is high. */
-  --vuln-gradient: linear-gradient(90deg, #1b4ea8 0%, #2f81c9 28%, #57b0c4 50%, #c8cf7a 74%, #f5d13f 100%);
+  --vuln-gradient: linear-gradient(90deg,
+    #e9edf0 0%, #c9d4dc 20%,
+    #9dbfd8 20%, #4d7ea8 40%,
+    #d9c26a 40%, #dfa04a 60%,
+    #cc7a2e 60%, #a85d1c 80%,
+    #9e3b2a 80%, #6f2019 100%);
 }
 
 html,

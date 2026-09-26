@@ -40,6 +40,32 @@ uniform float uLiftBlend;
 uniform float uLiftHasB;
 uniform float uLiftAmp;          // metres at index 100; 0 disables the whole mechanic
 
+// Real ground, from the Copernicus DEM. Two planes because one 8-bit channel over
+// 274 m of relief is a 1.1 m step, and the normal is a difference of neighbours —
+// the quantisation invisible on the ground shows up in the lighting as facets.
+uniform sampler2D uTerrainHi;
+uniform sampler2D uTerrainLo;
+uniform float uTerrainSpan;      // metres from texel 0 to texel 65535
+uniform float uTerrainAmp;       // 1 = true scale; 0 = no terrain (raster absent)
+
+/** Ground elevation at this cell, metres above the zone's lowest point.
+ *
+ *  Relative to the zone floor, not absolute: the scene origin is that floor, and
+ *  carrying 539 m of sea-level datum in every vertex would spend depth precision
+ *  the rest of the twin is tuned for on a constant.
+ *
+ *  Both planes are filtered LINEAR and that is safe — u = 256*hi + lo is a linear
+ *  combination, so interpolating the bytes separately and combining gives exactly
+ *  the interpolated 16-bit value, including across a low-byte wrap.
+ */
+float terrainAt(vec2 uv) {
+  if (uTerrainAmp <= 0.0) return 0.0;
+  vec2 p = clamp(uv, 0.0, 1.0);
+  float hi = texture2D(uTerrainHi, p).r * 255.0;
+  float lo = texture2D(uTerrainLo, p).r * 255.0;
+  return (hi * 256.0 + lo) / 65535.0 * uTerrainSpan * uTerrainAmp;
+}
+
 /**
  * Pedestrian feels-like temperature at this cell, °C.
  *
@@ -63,14 +89,26 @@ float vulnerabilityAt(vec2 uv) {
   return clamp(45.0 * heatTerm + staticTerm, 0.0, 100.0);
 }
 
-/** Metres to raise this point so it sits on the vulnerability terrain. */
+/**
+ * Metres to raise this point.
+ *
+ * Two terms, and they mean different things. The first is the real hill the city is
+ * built on and is always there. The second is the vulnerability index rendered as
+ * relief, which only exists while that overlay is on — an analytic surface stacked
+ * on top of a physical one.
+ *
+ * They add rather than replace so the overlay deforms the actual ground instead of
+ * flattening it: with the index off you get Katraj as it is, and with it on you get
+ * Katraj with the risk piled onto the slopes it belongs to.
+ */
 float liftAt(vec2 uv) {
-  if (uLiftAmp <= 0.0) return 0.0;
+  float ground = terrainAt(uv);
+  if (uLiftAmp <= 0.0) return ground;
   // Slight easing rather than a straight ramp: it flattens the low ground so the
   // comfortable majority of the city stays a plain, readable floor, and spends the
   // relief on the upper half of the index where the decisions actually are.
   float v = vulnerabilityAt(uv) * 0.01;
-  return uLiftAmp * v * v * (3.0 - 2.0 * v);
+  return ground + uLiftAmp * v * v * (3.0 - 2.0 * v);
 }
 `;
 
@@ -82,6 +120,10 @@ export interface LiftUniforms {
   uLiftBlend: { value: number };
   uLiftHasB: { value: number };
   uLiftAmp: { value: number };
+  uTerrainHi: { value: THREE.Texture | null };
+  uTerrainLo: { value: THREE.Texture | null };
+  uTerrainSpan: { value: number };
+  uTerrainAmp: { value: number };
 }
 
 /**
@@ -91,7 +133,10 @@ export interface LiftUniforms {
  * a dropped update would tear the city away from the terrain it stands on. One
  * object means that cannot happen.
  */
-export function makeLiftUniforms(vulnStatic: THREE.Texture | null): LiftUniforms {
+export function makeLiftUniforms(
+  vulnStatic: THREE.Texture | null,
+  terrain?: { hi: THREE.Texture; lo: THREE.Texture; spanM: number } | null,
+): LiftUniforms {
   return {
     uVulnStatic: { value: vulnStatic },
     uLiftHeatA: { value: null },
@@ -99,5 +144,9 @@ export function makeLiftUniforms(vulnStatic: THREE.Texture | null): LiftUniforms
     uLiftBlend: { value: 0 },
     uLiftHasB: { value: 0 },
     uLiftAmp: { value: 0 },
+    uTerrainHi: { value: terrain?.hi ?? null },
+    uTerrainLo: { value: terrain?.lo ?? null },
+    uTerrainSpan: { value: terrain?.spanM ?? 0 },
+    uTerrainAmp: { value: terrain ? 1 : 0 },
   };
 }
