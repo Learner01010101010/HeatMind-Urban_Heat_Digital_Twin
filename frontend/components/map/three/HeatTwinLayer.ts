@@ -606,10 +606,10 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
       // Slightly lighter than the old raster overlay's 0.58: the ground now also
       // carries sky-view ambient occlusion and live shadow tint, so the same opacity
       // read heavier than before and buried the buildings standing in it.
-      opacity: twin ? 0.5 : 0.42,
+      opacity: twin ? 0.5 : 0.25,
       isotherms: true,
-      ao: twin ? 0.75 : 0.45,
-      shade: twin ? 0.8 : 0.5,
+      ao: twin ? 0.75 : 0.2,
+      shade: twin ? 0.8 : 0.25,
     });
     this.map?.triggerRepaint();
   }

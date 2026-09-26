@@ -48,6 +48,7 @@ export default function CityOpsAdvisory() {
       {hotspots.length < 2 ? <p className="text-sm mt-4">Plan a route and wait for matching heat data. At least two above-average segments are needed.</p> : <ul className="space-y-3 my-4 text-sm">{hotspots.map((h) => <li key={h.id}><strong>{h.location}</strong><div>+{h.deviation_c}° · {h.cause}</div></li>)}</ul>}
       <button type="button" disabled={advisory.busy || hotspots.length < 2} onClick={() => void generate()} className="press rounded-full bg-cool-400 text-ink-950 px-4 py-2 text-sm font-semibold disabled:opacity-50">{advisory.busy ? "Generating…" : "Generate advisory"}</button>
       <p role="status" className="mt-4 text-sm leading-relaxed">{advisory.source === source ? advisory.result?.text : advisory.result ? "Heat data changed — generate a current advisory." : ""}</p>
+      {advisory.source === source && advisory.result?.error && <p className="mt-2 text-xs text-ink-400">{advisory.result.error === "quota" ? "Google's free API quota is exhausted. Try again after the quota resets." : advisory.result.error === "configuration" ? "Check the Gemini API key and model in frontend/.env.local, then restart the app." : advisory.result.error === "timeout" ? "Google took too long to respond. You can try again." : "Google could not return an advisory. You can try again."}</p>}
     </section>
   );
 }

@@ -18,6 +18,7 @@ import { HeatTwinOverlayLayer, OVERLAY_LAYER_ID } from "./three/overlayLayer";
 import { loadFields } from "./three/fields";
 import type { SignalRecord } from "./three/signals";
 import type { TreeRecord } from "./three/trees";
+import { addFlatMapDetails, addWaterStopLayers, setFlatDetailsVisible, setFlatZoneData, setWaterStopData, waterStopDescription, WATER_LAYERS } from "./flatMapDetails";
 
 // How much of the twin is built around the user's own starting point. Generous
 // enough that the first view is a real neighbourhood rather than a keyhole, and
@@ -241,7 +242,7 @@ export default function TwinMap() {
         },
       });
       map.addSource("buildings", { type: "geojson", data: EMPTY });
-      map.addLayer({ id: "buildings-2d", type: "fill", source: "buildings", paint: { "fill-color": "#1e1d1b", "fill-opacity": 0.92, "fill-outline-color": "#33312e" } });
+      map.addLayer({ id: "buildings-2d", type: "fill", source: "buildings", minzoom: 15, paint: { "fill-color": ["interpolate", ["linear"], ["get", "height_m"], 0, "#303d46", 15, "#43525c", 40, "#5c686c"], "fill-opacity": 0.9, "fill-outline-color": "#718087" } });
       map.addSource("pois", { type: "geojson", data: EMPTY });
       map.addLayer({
         id: "pois", type: "circle", source: "pois", minzoom: 14.5,
@@ -285,6 +286,8 @@ export default function TwinMap() {
       map.addLayer({ id: "route-heat", type: "line", source: "route-seg", layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": ["coalesce", ["feature-state", "c"], ["get", "c"]], "line-width": ["case", ["get", "sel"], 6, 3], "line-opacity": ["case", ["get", "sel"], 1, 0.5] } });
       // static centre-line on the selected route (no motion — routes update in place)
       map.addLayer({ id: "route-core", type: "line", source: "routes", filter: ["get", "sel"], layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": "#ffffff", "line-width": 1.5, "line-opacity": 0.85 } });
+      addFlatMapDetails(map);
+      addWaterStopLayers(map);
       setReady(map);
     });
 
@@ -304,6 +307,7 @@ export default function TwinMap() {
     const map = ready;
     if (!ready || !map || !zone.data) return;
     (map.getSource("buildings") as maplibregl.GeoJSONSource).setData(unpackBuildings(zone.data.buildings));
+    setFlatZoneData(map, zone.data);
     (map.getSource("water") as maplibregl.GeoJSONSource).setData({
       type: "FeatureCollection",
       features: zone.data.surfaces.features.filter((f) => f.properties?.kind === "water"),
@@ -534,7 +538,9 @@ export default function TwinMap() {
     // MAP mode keeps its flat footprints; the 3D layer eases its own extrusions in and
     // out of the ground from inside the render loop, so there is no RAF to drive here.
     map.setLayoutProperty("buildings-2d", "visibility", twin ? "none" : "visible");
-    map.setPaintProperty("labels", "raster-opacity", twin ? 0.35 : 0.75);
+    setFlatDetailsVisible(map, !twin);
+    map.setPaintProperty("labels", "raster-opacity", twin ? 0.35 : 0.25);
+    map.setPaintProperty("base", "raster-opacity", twin ? 1 : ["interpolate", ["linear"], ["zoom"], 14, 0.9, 16, 0.35, 18, 0.15]);
     // While guidance is running the chase camera owns pitch, bearing and zoom.
     // Entering the twin is part of starting navigation, so this easeTo would fire at
     // exactly the wrong moment and yank the view back to the fixed -28 degrees.
@@ -826,6 +832,8 @@ export default function TwinMap() {
     if (!ready || !map || !pois.data) return;
     const route = compare?.routes.find((r) => r.id === selected);
     const along = new Set(route?.pois_along_route.map((p) => p.id) ?? []);
+    // Water remains visible across the zone even after selecting a route.
+    setWaterStopData(map, pois.data, along);
     (map.getSource("pois") as maplibregl.GeoJSONSource).setData({
       type: "FeatureCollection",
       features: pois.data.features
@@ -1000,6 +1008,14 @@ export default function TwinMap() {
         else popup.setHTML('<div style="font-size:12px">Could not simulate that here — try a spot on open ground or a street.</div>');
         return;
       }
+      const water = map.queryRenderedFeatures(ev.point, { layers: WATER_LAYERS })[0];
+      if (water?.geometry.type === "Point") {
+        const props = water.properties;
+        new maplibregl.Popup({ maxWidth: "280px", offset: 25 }).setLngLat(water.geometry.coordinates as [number, number]).setHTML(
+          `<div style="min-width:200px"><div style="font-size:10px;color:#77d9f5;text-transform:uppercase;letter-spacing:.08em">Water stop</div><strong style="display:block;margin:5px 0">${esc(props.name)}</strong><p style="font-size:12px;color:#b7c6cd">${esc(waterStopDescription(props as { source: "osm" | "seeded"; detail?: string }))}</p><p style="font-size:10px;color:#858179;margin-top:8px">${props.on ? "Along the selected route · " : ""}${props.source === "osm" ? "OpenStreetMap" : "Seeded estimate"} · confirm access on arrival</p></div>`
+        ).addTo(map);
+        return;
+      }
       const hit = map.queryRenderedFeatures(ev.point, { layers: ["route-halo"] })[0];
       if (hit) {
         st.set({ selectedRouteId: hit.properties.id as string });
@@ -1037,10 +1053,12 @@ export default function TwinMap() {
     map.on("click", onClick);
     map.on("mouseenter", "route-halo", enter);
     map.on("mouseleave", "route-halo", leave);
+    WATER_LAYERS.forEach((id) => { map.on("mouseenter", id, enter); map.on("mouseleave", id, leave); });
     return () => {
       map.off("click", onClick);
       map.off("mouseenter", "route-halo", enter);
       map.off("mouseleave", "route-halo", leave);
+      WATER_LAYERS.forEach((id) => { map.off("mouseenter", id, enter); map.off("mouseleave", id, leave); });
     };
   }, [ready, base]);
 
@@ -1050,6 +1068,10 @@ export default function TwinMap() {
   return (
     <div className="absolute inset-0 bg-ink-950">
       <div ref={el} className="absolute inset-0" role="application" aria-label="Heat digital twin map" />
+      {ready && mode !== "twin" && <div className="pointer-events-none absolute right-4 bottom-[145px] md:bottom-[130px] rounded-xl bg-ink-950/85 border border-white/10 px-3 py-2 text-[10px] text-ink-200 max-w-[190px]">
+        <div className="flex items-center gap-2 font-semibold"><span className="text-[#77d9f5]">●</span> Water stops · tap a blue pin</div>
+        <div className="mt-1 text-ink-400">Taps, shops & cafés · faded pins are estimated</div>
+      </div>}
       {!ready && (
         <div className="absolute inset-0 grid place-items-center">
           <div className="flex flex-col items-center gap-3 text-ink-400 text-sm fade-in">
