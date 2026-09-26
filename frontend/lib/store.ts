@@ -196,6 +196,16 @@ interface MapState {
   selectedBreak: BreakStop | null;
   /** Emergency sheet: nearest water, shade and rest from where the user is now. */
   emergencyOpen: boolean;
+  /**
+   * Whether the "start from where I am" panel is open.
+   *
+   * In the store rather than in the component because the component does not
+   * survive its own state changes: starting a simulated trip swaps the bottom bar
+   * for the guidance one, which unmounts that MyLocation and mounts another. With
+   * the flag local, cancelling a trip made the panel vanish instead of returning to
+   * its opening state, which is precisely when someone needs it back.
+   */
+  locationPanelOpen: boolean;
   set: (p: Partial<Omit<MapState, "set">>) => void;
 }
 
@@ -226,5 +236,6 @@ export const useMap = create<MapState>()((set) => ({
   revealOn: true,
   selectedBreak: null,
   emergencyOpen: false,
+  locationPanelOpen: false,
   set: (p) => set(p),
 }));
