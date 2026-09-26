@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useNav } from "@/lib/navigation";
 import { useMap } from "@/lib/store";
+import CityOpsAdvisory, { CityOpsToggle } from "@/components/hud/CityOpsAdvisory";
 
 // The Planner is a city-scale intervention tool, not something anyone reaches for
 // mid-walk, and it was taking a permanent third of the bar on every screen. It is
@@ -30,6 +31,7 @@ export default function GlobalNav() {
 
   return (
     <>
+      <CityOpsAdvisory />
       <nav className="hidden md:flex fixed top-5 left-1/2 -translate-x-1/2 z-[60] glass rounded-full p-1 gap-0.5" aria-label="Main">
         {ITEMS.map((it) => {
           const on = isOn(it.href);
@@ -47,6 +49,7 @@ export default function GlobalNav() {
             </Link>
           );
         })}
+        <CityOpsToggle />
         <button
           onClick={() => setMap({ emergencyOpen: true })}
           className="press hm-sos flex items-center gap-2 h-10 rounded-full px-3.5 text-[13px] font-semibold"
@@ -71,6 +74,7 @@ export default function GlobalNav() {
             </Link>
           );
         })}
+        <CityOpsToggle />
         <button
           onClick={() => setMap({ emergencyOpen: true })}
           className="flex-1 flex flex-col items-center justify-center gap-1 text-[#ff8a7a]"

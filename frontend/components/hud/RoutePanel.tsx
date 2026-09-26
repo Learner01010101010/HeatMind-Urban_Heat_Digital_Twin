@@ -13,6 +13,7 @@ import AnimatedNumber from "@/components/ui/AnimatedNumber";
 import HeatProfileChart from "@/components/ui/HeatProfileChart";
 import RiskRing from "@/components/ui/RiskRing";
 import { StartNavButton } from "./NavHud";
+import { AdvisoryRoutePermission } from "./CityOpsAdvisory";
 
 /** Glyph per travel mode, matching ModeSelector. */
 const MODE_ICON: Record<string, typeof Footprints> = {
@@ -111,6 +112,7 @@ export default function RoutePanel({ route }: { route: Route }) {
 
   return (
     <div className="space-y-6">
+      <AdvisoryRoutePermission route={route} />
       {/* hero */}
       <div className="flex items-center gap-5">
         <div className="flex-1">
