@@ -50,6 +50,7 @@ export default function NavHud({ route }: { route: Route }) {
   const progressM = useNav((s) => s.progressM);
   const live = useNav((s) => s.live);
   const offRouteM = useNav((s) => s.offRouteM);
+  const simSpeed = useNav((s) => s.simSpeed);
   const [now, setNow] = useState(() => Date.now());
   const raf = useRef(0);
   const last = useRef(0);
@@ -151,8 +152,27 @@ export default function NavHud({ route }: { route: Route }) {
         </div>
         <div className="flex-1 min-w-0 text-right">
           <div className={`text-[10.5px] ${live ? "text-emerald-300" : "text-ink-500"}`}>
-            {live ? "Following your position" : "Preview — no position fix"}
+            {live ? "Following your position" : `Simulated · ${route.speed_kmh ?? 5} km/h`}
           </div>
+          {/* Playback rate, only while the walk is simulated. A real trip moves at
+              the speed the body is moving and this has nothing to offer it; a demo
+              in front of a room cannot wait fifty minutes for a fifty-minute route. */}
+          {!live && (
+            <div className="flex items-center gap-1 justify-end mt-1">
+              {[1, 4, 12].map((x) => (
+                <button
+                  key={x}
+                  onClick={() => useNav.getState().set({ simSpeed: x })}
+                  className={`press px-1.5 h-5 rounded-full text-[10px] font-bold tabular ${
+                    simSpeed === x ? "bg-white/[0.16] text-ink-100" : "text-ink-500 hover:text-ink-300"
+                  }`}
+                  aria-label={`Play the simulation at ${x} times speed`}
+                >
+                  {x}×
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <button
           onClick={stopNavigation}

@@ -680,6 +680,32 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     this.map?.triggerRepaint();
   }
 
+  /**
+   * Ground height at a point, in metres above the zone's floor.
+   *
+   * For the HTML markers. Everything drawn inside this scene rides the terrain
+   * through the shared lift in its own vertex shader, but a MapLibre Marker is a DOM
+   * element positioned from a lng/lat at z = 0 — it has no way to know the ground
+   * moved. With the twin standing on real elevation that leaves every water dot, POI
+   * and route pin buried in the hillside it is supposed to be sitting on.
+   *
+   * So the map reads the height from here and nudges the marker up the screen by it.
+   * Returns 0 when no DEM is loaded, which is the flat case and correct.
+   */
+  elevationAt(lat: number, lon: number): number {
+    const t = this.fields.terrain;
+    if (!t) return 0;
+    const [x, y] = this.fields.origin.toXY(lat, lon);
+    const c = Math.round(x / this.fields.cellM - 0.5);
+    // The planes are stored GL-side-up, row 0 at the south edge.
+    const r = Math.round(y / this.fields.cellM - 0.5);
+    if (c < 0 || r < 0 || c >= this.fields.cols || r >= this.fields.rows) return 0;
+    const i = r * this.fields.cols + c;
+    const hi = t.hi.image.data as Uint8Array;
+    const lo = t.lo.image.data as Uint8Array;
+    return ((hi[i] * 256 + lo[i]) / 65535) * t.spanM;
+  }
+
   /** How many pins are currently standing (for the development hook). */
   get pinCount(): number {
     return this.pins?.count ?? 0;
