@@ -28,7 +28,7 @@ async def compare(req: CompareRequest):
         return await run_in_threadpool(
             get_planner().compare, origin=(req.origin.lat, req.origin.lon),
             destination=(req.destination.lat, req.destination.lon), persona=req.persona, scenario=req.scenario,
-            depart=depart, temp_delta=req.temp_delta_c, mode=req.mode)
+            depart=depart, temp_delta=req.temp_delta_c, mode=req.mode, senior=req.senior)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 

@@ -1,12 +1,15 @@
 "use client";
 
-import { Droplets, LifeBuoy, Phone, TreePine, TriangleAlert, Umbrella, X } from "lucide-react";
-import { useMemo } from "react";
+import { Droplets, LifeBuoy, MessageCircle, Phone, ThumbsUp, TreePine, TriangleAlert, Umbrella, X } from "lucide-react";
+import { useMemo, useState } from "react";
 import type { Poi } from "@/lib/api";
 import { useNearestFrame, usePois } from "@/lib/hooks";
 import { useGeo } from "@/lib/geolocation";
 import { fmtTemp, heatColor } from "@/lib/heatColorScale";
 import { useMap, usePrefs } from "@/lib/store";
+
+/** Local-only check-in log. No backend: a timestamp on this device, nothing more. */
+const CHECKIN_KEY = "heatmind-checkins";
 
 /**
  * The one screen for someone who is in trouble right now.
@@ -92,6 +95,9 @@ export default function EmergencySheet() {
   const set = useMap((s) => s.set);
   const units = usePrefs((s) => s.units);
   const geo = useGeo();
+  const senior = usePrefs((s) => s.seniorMode);
+  const [checkIn, setCheckIn] = useState<Date | null>(null);
+  const [sent, setSent] = useState(false);
   const pois = usePois();
   const frame = useNearestFrame();
 
@@ -180,6 +186,61 @@ export default function EmergencySheet() {
             <X size={14} />
           </button>
         </div>
+
+        {/* Senior Mode splits the top of this panel in two. Most of the time someone
+            opening it is hot and uncertain rather than collapsing, and "I'm okay" is
+            the answer they want to give — it is also the one that leaves a trace, so
+            a gap in the log means something. "Need help" stays one tap away above
+            the ambulance number, not instead of it. */}
+        {senior && (
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            <button
+              onClick={() => {
+                const at = new Date();
+                setCheckIn(at);
+                try {
+                  const log = JSON.parse(localStorage.getItem(CHECKIN_KEY) ?? "[]") as string[];
+                  localStorage.setItem(CHECKIN_KEY, JSON.stringify([at.toISOString(), ...log].slice(0, 50)));
+                } catch {
+                  /* private mode or blocked storage — the on-screen confirmation still stands */
+                }
+              }}
+              className="press flex flex-col items-center justify-center gap-1 h-[62px] rounded-2xl font-semibold text-[13.5px]"
+              style={{ background: "rgba(111,191,94,.16)", color: "#a7e08e" }}
+            >
+              <ThumbsUp size={17} />
+              I&apos;m okay
+            </button>
+            <button
+              onClick={() => setSent(true)}
+              className="press flex flex-col items-center justify-center gap-1 h-[62px] rounded-2xl font-semibold text-[13.5px]"
+              style={{ background: "rgba(224,59,47,.18)", color: "#ff9d92" }}
+            >
+              <MessageCircle size={17} />
+              Need help
+            </button>
+          </div>
+        )}
+
+        {senior && checkIn && (
+          <div className="mb-3 text-[11.5px] text-ink-400">
+            Checked in at{" "}
+            <span className="text-ink-200 tabular">
+              {checkIn.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+            </span>
+            .
+          </div>
+        )}
+
+        {senior && sent && (
+          <div
+            className="mb-3 rounded-2xl px-3 py-2 text-[12px] leading-snug"
+            style={{ background: "rgba(224,59,47,.14)", color: "#ffb4ab" }}
+          >
+            Message sent to your emergency contact. This is a demonstration — no message
+            left the device, and it is not a substitute for calling 108.
+          </div>
+        )}
 
         {/* Call first. A panel that buries this under a list of taps has its priorities
             wrong: confusion, collapse or hot dry skin is an ambulance, not a walk. */}

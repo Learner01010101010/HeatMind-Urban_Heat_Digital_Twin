@@ -1,11 +1,12 @@
 "use client";
 
-import { ArrowDownUp, Bike, Bus, Car, Check, ChevronDown, Droplets, Footprints, Loader2, Moon, Route as RouteIcon, Sparkles, Sun, Thermometer, TreePine, Zap } from "lucide-react";
+import { ArrowDownUp, Bike, Bus, Car, Check, ChevronDown, Droplets, Footprints, Loader2, Moon, Route as RouteIcon, Sparkles, Sun, Thermometer, TreePine, TriangleAlert, Zap } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, type Route } from "@/lib/api";
 import { ensureUser, useMeta } from "@/lib/hooks";
 import { fmtDist, fmtTemp, heatColor, riskColor } from "@/lib/heatColorScale";
+import { REST_DETAILS, warnScore } from "@/lib/seniorMode";
 import { POI_STYLE } from "@/lib/poiStyle";
 import { atTime, TIMELINE, TIMELINE_MAX, useMap, usePrefs } from "@/lib/store";
 import AnimatedNumber from "@/components/ui/AnimatedNumber";
@@ -53,6 +54,12 @@ export default function RoutePanel({ route }: { route: Route }) {
   const set = useMap((s) => s.set);
   const units = usePrefs((s) => s.units);
   const persona = usePrefs((s) => s.persona);
+  const senior = usePrefs((s) => s.seniorMode);
+  // Benches and toilets the route actually passes. Counted from the POIs the router
+  // already attached to it, so this needs nothing new from the backend.
+  const restPoints = route.pois_along_route.filter((p) =>
+    REST_DETAILS.includes((p.detail ?? "").toLowerCase()),
+  ).length;
   const meta = useMeta();
   const [logState, setLogState] = useState<"idle" | "busy" | "done" | "error">("idle");
   const [polished, setPolished] = useState<{ id: string; text: string } | null>(null);
@@ -128,6 +135,23 @@ export default function RoutePanel({ route }: { route: Route }) {
         <RiskRing score={score} size={92} stroke={7} label="heat risk" />
       </div>
 
+      {/* Senior Mode calls a route out earlier. The badge carries the number it is
+          judging against rather than just a word, so the lower bar is visible
+          rather than something the app quietly did. It tracks the live score, so
+          scrubbing the timeline moves it in and out. */}
+      {senior && score >= warnScore(true) && (
+        <div
+          className="flex items-center gap-2 rounded-2xl px-3 py-2.5 -mt-2"
+          style={{ background: "rgba(241,108,44,.13)", color: "#ffc48a" }}
+        >
+          <TriangleAlert size={15} className="shrink-0" />
+          <span className="text-[12.5px] leading-snug">
+            High exposure for Senior Mode — this route scores {Math.round(score)}, over the{" "}
+            {warnScore(true)} threshold. Standard Mode flags it from {warnScore(false)}.
+          </span>
+        </div>
+      )}
+
       <StartNavButton route={route} />
 
       <div className="grid grid-cols-2 gap-2.5">
@@ -140,6 +164,17 @@ export default function RoutePanel({ route }: { route: Route }) {
             : { l: "Shade coverage", v: <AnimatedNumber value={shade} suffix="%" />, c: "#6ff0da" },
           { l: "In danger heat", v: `${Math.round(route.metrics.minutes_danger)} min`, c: "#fca5a5" },
           { l: "Water & cooling", v: `${water} stops`, c: "#9dc06a" },
+          // Senior Mode replaces nothing; it adds the tile it cares about. Named by
+          // what is actually mapped -- benches -- rather than a vaguer "rest points",
+          // because the number is small and the reader should know exactly what it
+          // counts.
+          ...(senior
+            ? [{
+                l: "Rest points",
+                v: `${restPoints} bench${restPoints === 1 ? "" : "es"}`,
+                c: restPoints > 0 ? "#ffd08a" : "#858179",
+              }]
+            : []),
         ].map((x) => (
           <div key={x.l} className="rounded-[22px] bg-white/[0.035] px-4 py-3.5">
             <div className="text-[11.5px] text-ink-400">{x.l}</div>

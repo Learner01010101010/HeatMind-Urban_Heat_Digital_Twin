@@ -1,8 +1,10 @@
 "use client";
 
 import { Bike, Bus, Car, Footprints, Zap } from "lucide-react";
+import { useEffect } from "react";
 import type { TravelMode } from "@/lib/api";
 import { setMode } from "@/lib/actions";
+import { modeAllowed, SENIOR_MODES } from "@/lib/seniorMode";
 import { useMap, usePrefs } from "@/lib/store";
 
 /**
@@ -23,7 +25,17 @@ const OPTIONS: { key: TravelMode; label: string; Icon: typeof Bike; hint: string
 
 export default function ModeSelector({ compact = false }: { compact?: boolean }) {
   const mode = usePrefs((s) => s.mode);
+  const senior = usePrefs((s) => s.seniorMode);
   const loading = useMap((s) => s.loading);
+
+  // Senior Mode drops the bicycle and the two-wheeler. Anyone already on one when
+  // the mode is turned on is moved to walking rather than left on a vehicle the
+  // picker no longer offers — otherwise the selected tab is invisible and nothing
+  // can be changed back.
+  const options = senior ? OPTIONS.filter((o) => SENIOR_MODES.includes(o.key)) : OPTIONS;
+  useEffect(() => {
+    if (!modeAllowed(mode, senior)) setMode("walk");
+  }, [mode, senior]);
 
   return (
     <div
@@ -31,7 +43,7 @@ export default function ModeSelector({ compact = false }: { compact?: boolean })
       role="radiogroup"
       aria-label="Travel mode"
     >
-      {OPTIONS.map(({ key, label, Icon, hint }) => {
+      {options.map(({ key, label, Icon, hint }) => {
         const on = mode === key;
         return (
           <button
