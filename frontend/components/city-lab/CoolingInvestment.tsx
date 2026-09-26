@@ -2,13 +2,14 @@
 
 import { ArrowRight, Download, Droplets, Loader2, RefreshCw, Sparkles, Trash2, TreePine } from "lucide-react";
 import { useEffect, useState } from "react";
-import { AREAS, cityLabApi, DEFAULT_COSTS, downloadText, KIND_COLORS, KIND_LABELS, money, type CoolingPlan, type LabArea, type LabCatalog, type LabKind, type LabMode, type LabProject } from "@/lib/cityLabApi";
+import { AREAS, cityLabApi, DEFAULT_COSTS, KIND_COLORS, KIND_LABELS, MAX_UNIT_COST, money, type CoolingPlan, type LabArea, type LabCatalog, type LabKind, type LabMode, type LabProject } from "@/lib/cityLabApi";
+import { downloadPdf, type Line } from "@/lib/pdf";
 import { PlanningMap, Stat } from "./LabVisuals";
 
 export default function CoolingInvestment() {
   const [area, setArea] = useState<LabArea>("narhe");
   const [mode, setMode] = useState<LabMode>("demo");
-  const [budget, setBudget] = useState(150000);
+  const [budget, setBudget] = useState(1_608_000);
   const [costs, setCosts] = useState(DEFAULT_COSTS);
   const [data, setData] = useState<LabCatalog | null>(null);
   const [plan, setPlan] = useState<CoolingPlan | null>(null);
@@ -38,10 +39,59 @@ export default function CoolingInvestment() {
   const projects = plan?.projects.map(({ site_id, kind }) => ({ site_id, kind })) ?? [];
   const site = data?.sites.find((s) => s.id === active);
   const choice = site && kind !== "water_refill" ? site.choices[kind] : null;
+  const blocked = site?.feasible?.[kind];
+  const canBuild = !blocked || blocked.ok;
   const add = () => run([...projects.filter((p) => p.site_id !== active), { site_id: active, kind }]);
+
+  /**
+   * The most the shortlist can absorb: one project per site, at the priciest
+   * option that can actually be built there. A budget above this cannot be spent
+   * however the allocator is written, so the control stops here instead of
+   * inviting a number the proposal will always fall short of.
+   */
+  const capacity = (data?.sites ?? []).reduce((sum, s) => {
+    const affordable = (Object.keys(s.choices) as Exclude<LabKind, "water_refill">[])
+      .filter((k) => s.feasible?.[k]?.ok !== false)
+      .map((k) => costs[k]);
+    return sum + (affordable.length ? Math.max(...affordable) : 0);
+  }, 0);
+  const cap = capacity || MAX_UNIT_COST;
   const exportPlan = () => {
     if (!data || !plan) return;
-    downloadText("heatmind-cooling-proposal.json", JSON.stringify({ area: data.area_name, scenario: mode, time: data.time, costs_are_assumptions: true, budget, costs, ...plan, modelling_note: data.note }, null, 2), "application/json");
+    const rupees = (n: number) => `Rs. ${n.toLocaleString("en-IN")}`;
+    const when = new Date(data.time).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" });
+    const lines: Line[] = [
+      { text: "HeatMind - Street Cooling Proposal", size: 19, bold: true, gap: 4 },
+      { text: `${data.area_name}  |  ${when} IST  |  ${mode === "demo" ? "Demo heatwave scenario" : "Live conditions"}`, size: 9.5, gap: 10 },
+      { rule: true },
+      { text: "Summary", size: 13, bold: true, gap: 4 },
+      { text: `Available budget: ${rupees(budget)}`, gap: 1 },
+      { text: `Planned investment: ${rupees(plan.spent)} across ${plan.projects.length} projects`, gap: 1 },
+      { text: `Unallocated: ${rupees(plan.remaining)} - ${plan.allocation_note}`, gap: 1 },
+      ...(plan.before_c !== null
+        ? [{ text: `Modelled feels-like in the selected patches: ${plan.before_c.toFixed(1)}C before, ${plan.after_c?.toFixed(1)}C after (${plan.reduction_c.toFixed(2)}C reduction).`, gap: 10 } as Line]
+        : [{ text: "Access proposals only; no temperature reduction is modelled.", gap: 10 } as Line]),
+      { rule: true },
+      { text: "Projects", size: 13, bold: true, gap: 4 },
+      ...plan.projects.flatMap((pr, i): Line[] => [
+        { text: `${i + 1}. ${KIND_LABELS[pr.kind]} - ${pr.name}`, bold: true, gap: 1 },
+        { text: `${rupees(pr.cost)}  |  ${pr.result ? `${Math.max(0, -pr.result.delta_c).toFixed(1)}C modelled reduction over ${(pr.result.cells_affected * 100).toLocaleString("en-IN")} m2` : "planned water access, no cooling modelled"}  |  ${pr.lat.toFixed(5)}, ${pr.lon.toFixed(5)}`, size: 9, indent: 14, gap: 5 },
+      ]),
+      { spacer: 4 },
+      { rule: true },
+      { text: "Unit costs and where they come from", size: 13, bold: true, gap: 4 },
+      ...Object.entries(data.kinds).flatMap(([k, info]): Line[] => [
+        { text: `${info.label} - ${rupees(costs[k as LabKind])}${costs[k as LabKind] !== info.cost ? ` (edited from ${rupees(info.cost)})` : ""}`, bold: true, gap: 1 },
+        { text: info.basis, size: 9, indent: 14, gap: 1 },
+        { text: `Source: ${info.source}`, size: 8.5, indent: 14, gap: 6 },
+      ]),
+      { rule: true },
+      { text: "Method and limits", size: 13, bold: true, gap: 4 },
+      { text: plan.method, size: 9, gap: 6 },
+      { text: data.note, size: 9, gap: 6 },
+      { text: "Reference costs, not quotations. This document is a planning demonstration produced from a model; it is not a tender estimate and carries no commitment.", size: 8.5 },
+    ];
+    downloadPdf(`heatmind-cooling-proposal-${data.area}.pdf`, lines);
   };
 
   return <div className="space-y-5">
@@ -56,12 +106,13 @@ export default function CoolingInvestment() {
         <label className="block text-xs text-ink-300">Conditions<select aria-label="Planning conditions" value={mode} disabled={busy || loading} onChange={(e) => changeArea(area, e.target.value as LabMode)} className="mt-2 w-full rounded-xl bg-ink-800 p-3 text-sm text-ink-100"><option value="demo">Demo heatwave · 1:30 PM</option><option value="live">Current live conditions</option></select></label>
         <div>
           <label htmlFor="lab-budget" className="text-xs text-ink-300">Available budget · INR</label>
-          <input id="lab-budget" type="number" min="0" max="1000000" step="1000" value={budget} disabled={busy} onChange={(e) => { setBudget(Number(e.target.value)); setDirty(!!plan); }} className="mt-2 w-full rounded-xl bg-ink-800 p-3 text-xl font-semibold tabular" />
-          <input aria-label="Adjust investment budget" type="range" min="0" max="1000000" step="5000" value={Math.max(0, Math.min(1000000, budget))} disabled={busy} onChange={(e) => { setBudget(Number(e.target.value)); setDirty(!!plan); }} className="w-full mt-3 accent-[#8ad8b0]" />
-          <div className="flex justify-between text-[10px] text-ink-400"><span>₹0</span><span>₹10 lakh</span></div>
+          <input id="lab-budget" type="number" min="0" max={cap} step="1000" value={budget} disabled={busy} onChange={(e) => { setBudget(Math.min(cap, Number(e.target.value))); setDirty(!!plan); }} className="mt-2 w-full rounded-xl bg-ink-800 p-3 text-xl font-semibold tabular" />
+          <input aria-label="Adjust investment budget" type="range" min="0" max={cap} step="1000" value={Math.max(0, Math.min(cap, budget))} disabled={busy} onChange={(e) => { setBudget(Number(e.target.value)); setDirty(!!plan); }} className="w-full mt-3 accent-[#8ad8b0]" />
+          <div className="flex justify-between text-[10px] text-ink-400"><span>₹0</span><span>{money(cap)}</span></div>
+          <p className="text-[10px] text-ink-400 mt-2">Capped at what these {data?.sites.length ?? 0} sites can absorb — one project each, at the priciest fix each site can take.</p>
         </div>
-        <details className="text-xs text-ink-300"><summary className="cursor-pointer">Edit assumed cost per project</summary><div className="space-y-3 mt-3">{Object.keys(costs).map((k) => <label key={k} className="block">{KIND_LABELS[k as LabKind]}<input aria-label={`${KIND_LABELS[k as LabKind]} unit cost`} type="number" min="1000" max="500000" step="1000" value={costs[k as LabKind]} disabled={busy} onChange={(e) => { setCosts({ ...costs, [k]: Number(e.target.value) }); setDirty(!!plan); }} className="mt-1 w-full rounded-lg bg-ink-800 p-2 tabular" /></label>)}</div></details>
-        <p className="text-[11px] text-ink-400">Costs are demo assumptions, not vendor quotes. Cooling fixes represent a 20 m model radius; trees represent mature canopy.</p>
+        <details className="text-xs text-ink-300"><summary className="cursor-pointer">Edit assumed cost per project</summary><div className="space-y-3 mt-3">{Object.keys(costs).map((k) => <label key={k} className="block">{KIND_LABELS[k as LabKind]}<input aria-label={`${KIND_LABELS[k as LabKind]} unit cost`} type="number" min="1000" max={MAX_UNIT_COST} step="1000" value={costs[k as LabKind]} disabled={busy} onChange={(e) => { setCosts({ ...costs, [k]: Number(e.target.value) }); setDirty(!!plan); }} className="mt-1 w-full rounded-lg bg-ink-800 p-2 tabular" /></label>)}</div></details>
+        <p className="text-[11px] text-ink-400">Published reference costs, not vendor quotes — each one’s arithmetic and source are in the exported PDF. Cooling fixes represent a 20 m model radius; trees represent mature canopy.</p>
         <button disabled={busy || loading} onClick={() => { setLoading(true); setPlan(null); setError(""); setReload(reload + 1); }} className="text-xs text-ink-300 flex items-center gap-1.5 disabled:opacity-40"><RefreshCw size={12} />Refresh sites · clears proposal</button>
         <button disabled={!data || busy || loading} onClick={() => void run()} className="w-full rounded-xl bg-[#8ad8b0] text-ink-950 p-3 font-semibold text-sm flex justify-center items-center gap-2 disabled:opacity-40">{busy ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}{busy ? "Evaluating…" : "Suggest projects within budget"}</button>
         {plan && <button disabled={busy} onClick={() => void run(projects)} className="w-full rounded-xl border border-white/10 p-3 text-xs">Re-evaluate my selected projects</button>}
@@ -79,21 +130,22 @@ export default function CoolingInvestment() {
           <div className="flex flex-wrap gap-2">{Object.entries(KIND_LABELS).map(([k, label]) => <button key={k} onClick={() => setKind(k as LabKind)} aria-pressed={kind === k} className="rounded-xl border px-3 py-2 text-xs" style={{ borderColor: kind === k ? KIND_COLORS[k as LabKind] : "#ffffff15", color: kind === k ? KIND_COLORS[k as LabKind] : "#adaaa5" }}>{label}</button>)}</div>
           <div className="flex items-center justify-between flex-wrap gap-3">
             <div className="text-sm">{choice ? <span>{choice.before.feels_c.toFixed(1)}°C <ArrowRight size={14} className="inline mx-1 text-ink-400" /> <strong className="text-[#8ad8b0]">{choice.after.feels_c.toFixed(1)}°C</strong><span className="block text-[10px] text-ink-400 mt-1">Modelled patch average · {Math.max(0, -choice.delta_c).toFixed(1)}°C reduction</span></span> : <span className="flex items-start gap-2 text-[#77d9f5]"><Droplets size={16} />Proposed refill access only<span className="block text-[10px] text-ink-400">No temperature reduction assumed</span></span>}</div>
-            <button disabled={busy || loading || dirty} onClick={() => void add()} className="rounded-xl bg-white/10 px-4 py-2.5 text-xs font-semibold disabled:opacity-40">{projects.some((p) => p.site_id === active) ? "Replace project" : "Add project"} · {money(costs[kind])}</button>
+            <button disabled={busy || loading || dirty || !canBuild} onClick={() => void add()} className="rounded-xl bg-white/10 px-4 py-2.5 text-xs font-semibold disabled:opacity-40">{projects.some((p) => p.site_id === active) ? "Replace project" : "Add project"} · {money(costs[kind])}</button>
           </div>
+          {blocked && !blocked.ok && <p role="status" className="rounded-xl bg-[#ffc48a]/10 border border-[#ffc48a]/20 p-3 text-[11px] text-[#ffc48a] leading-relaxed">Cannot be built here. {blocked.reason}</p>}
+          {kind === "trees" && blocked?.ok && <p className="text-[10.5px] text-ink-400">{blocked.open_ground_m2.toLocaleString("en-IN")} m² of plantable open ground in this patch — no building, road, water or existing canopy.</p>}
         </div>}
       </div>
     </div>
     {error && <p role="alert" className="rounded-xl bg-red-400/10 border border-red-400/20 p-3 text-sm text-red-200">{error}</p>}
     {dirty && <p role="status" className="rounded-xl bg-[#ffc48a]/10 p-3 text-xs text-[#ffc48a]">Settings changed. Suggest a new plan or re-evaluate your projects to update these results.</p>}
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-      <Stat label="Planned investment" value={money(plan?.spent ?? 0)} hint={`${money(plan?.remaining ?? budget)} unallocated`} />
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <Stat label="Available budget" value={money(budget)} hint={`${data?.sites.length ?? 0} candidate sites`} />
+      <Stat label="Planned investment" value={money(plan?.spent ?? 0)} hint={plan ? plan.allocation_note : "Suggest a plan to allocate it"} color={plan && plan.remaining === 0 ? "#8ad8b0" : undefined} />
       <Stat label="Cooling in selected patches" value={`${plan?.reduction_c.toFixed(2) ?? "0.00"}°C`} hint="Weighted average · model estimate" color="#8ad8b0" />
-      <Stat label="Evaluated ground area" value={`${(plan?.evaluated_ground_m2 ?? 0).toLocaleString("en-IN")} m²`} hint="Separate model patches · not citywide" />
-      <Stat label="Proposed water refills" value={plan?.proposed_water_points ?? 0} hint="Planning only · no facilities installed" color="#77d9f5" />
     </div>
     {plan && <section className="glass rounded-3xl p-5 space-y-4">
-      <div className="flex items-center justify-between gap-3"><h2 className="font-semibold">Your proposal · {plan.projects.length} projects</h2><button onClick={exportPlan} className="text-xs text-ink-300 inline-flex items-center gap-1.5"><Download size={14} /> Export proposal</button></div>
+      <div className="flex items-center justify-between gap-3"><h2 className="font-semibold">Your proposal · {plan.projects.length} projects</h2><button onClick={exportPlan} className="text-xs text-ink-300 inline-flex items-center gap-1.5"><Download size={14} /> Export proposal (PDF)</button></div>
       {plan.before_c !== null && <div className="rounded-2xl bg-[#8ad8b0]/5 p-4 flex flex-wrap items-center gap-5"><div><span className="block text-[10px] text-ink-400">Before investment</span><strong className="text-2xl tabular">{plan.before_c.toFixed(1)}°C</strong></div><ArrowRight size={20} className="text-ink-400" /><div><span className="block text-[10px] text-ink-400">After proposal</span><strong className="text-2xl tabular text-[#8ad8b0]">{plan.after_c?.toFixed(1)}°C</strong></div><span className="text-xs text-ink-300">Average feels-like in the selected patches</span></div>}
       {!plan.projects.length && <p className="text-sm text-ink-400">No cooling project fits this budget with a positive estimated benefit. Increase the budget or add a proposal manually.</p>}
       <div className="grid md:grid-cols-2 gap-3">{plan.projects.map((p) => <article key={p.site_id} className="rounded-2xl border border-white/10 p-3 flex gap-3 items-start"><span className="rounded-lg px-2 py-1 text-xs" style={{ background: `${KIND_COLORS[p.kind]}15`, color: KIND_COLORS[p.kind] }}>{p.site_id.replace("site-", "#")}</span><div className="min-w-0 flex-1"><h3 className="text-sm font-medium">{KIND_LABELS[p.kind]}</h3><p className="text-[11px] text-ink-400 mt-1 break-words">{p.name}</p><p className="text-xs mt-2">{money(p.cost)} · {p.result ? `${Math.max(0, -p.result.delta_c).toFixed(1)}°C modelled reduction` : "planned water access"}</p></div><button aria-label={`Remove project at ${p.site_id}`} disabled={busy || dirty} onClick={() => void run(projects.filter((s) => s.site_id !== p.site_id))} className="text-ink-400 hover:text-red-200 p-1 disabled:opacity-30"><Trash2 size={14} /></button></article>)}</div>

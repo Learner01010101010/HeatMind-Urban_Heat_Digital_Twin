@@ -237,30 +237,31 @@ Route trip tips use a local rule-based expert system, with no Gemini call or quo
 Validation: `python -m unittest discover -s tests -v` from `backend/`; `npm run build`
 and targeted ESLint from `frontend/`.
 
-## City Lab demonstrations
+## City Lab
 
-Open **City Lab** in the website navigation (`/city-lab`). Cooling investment
-offers three mapped neighbourhoods, a separate 1:30 PM heatwave demo or current
-conditions, editable INR cost assumptions, manual project selection and a greedy
-budget proposal. Tree canopy, pavement and shade use the existing intervention
-simulator at separated sites. Before/after temperatures are weighted averages
-over evaluated patches, not a citywide reduction or a population-impact estimate.
-Water refills are proposed access points only, with no temperature benefit assumed.
-Trees assume mature canopy; costs are demonstrations, not deployment quotations.
-Exported proposals include these assumptions. Nothing modifies routes or the twin.
+Open **City Lab** in the website navigation (`/city-lab`). It turns a budget into
+a costed cooling proposal: three mapped neighbourhoods, a separate 1:30 PM
+heatwave demo or current conditions, editable INR unit costs, manual project
+selection and a greedy-then-fill budget allocator. Tree canopy, pavement and
+shade use the existing intervention simulator at separated sites.
 
-Sensor validation shows paired observations, a scatter plot, MAE, RMSE, signed
-bias and share within a chosen tolerance. The synthetic demo is explicitly
-labelled and cannot establish accuracy. Real comparisons accept a CSV with
-`lat,lon,time,metric,observed_c` and optional `predicted_c,label`; timestamps need a
-timezone, coordinates must be in the zone and each file must use one metric
-(`surface_c`, `air_c` or `feels_c`). Up to 60 readings / 60 KB are accepted.
-Download the live prediction template to save model references, then fill observed
-values from comparable measurements at those locations and times. Without saved
-predictions, only the last 24 hours with matching weather can be reconstructed;
-this is not an archived forecast. Uploaded references are user-supplied, not
-independently verified. Data is compared in memory and never recalibrates the
-model. Exported synthetic results retain their demo label if imported again.
+Unit costs are published reference figures rather than demonstration numbers, and
+each one ships the arithmetic that produced it plus its source; both appear in the
+exported PDF. They remain editable.
+
+Tree canopy is only offered where the building, road, water and canopy rasters
+show at least 400 m2 of plantable open ground inside the 20 m patch, so the tool
+cannot propose a tree on a spot that is built over, paved, water or already under
+canopy. Sites that fail say why.
+
+The budget control is capped at what the shortlist can absorb — one project per
+site, at the priciest fix each site can take — so a fully allocated proposal is
+reachable. Any shortfall is explained rather than left as a silent gap.
+
+Before/after temperatures are weighted averages over evaluated patches, not a
+citywide reduction or a population-impact estimate. Water refills are proposed
+access points only, with no temperature benefit assumed. Proposals export as PDF,
+assumptions and method included. Nothing modifies routes or the twin.
 
 ## Live micro-rest scheduling
 

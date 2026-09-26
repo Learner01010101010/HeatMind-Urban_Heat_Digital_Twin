@@ -7,9 +7,7 @@ import { X } from "lucide-react";
 import BreakSheet from "@/components/hud/BreakSheet";
 import EquityToggle from "@/components/hud/EquityToggle";
 import { InsightChip, InsightPanel } from "@/components/hud/InsightChip";
-import InterventionPanel from "@/components/hud/InterventionPanel";
 import MicroRestCard from "@/components/hud/MicroRestCard";
-import MyLocation from "@/components/hud/MyLocation";
 import ModeToggle from "@/components/hud/ModeToggle";
 import ModeSelector from "@/components/hud/ModeSelector";
 import NavHud from "@/components/hud/NavHud";
@@ -19,7 +17,6 @@ import LiveRouteMonitor from "@/components/hud/LiveRouteMonitor";
 import RouteEngineControls from "@/components/hud/RouteEngineControls";
 import SearchPill from "@/components/hud/SearchPill";
 import SimulateButton from "@/components/hud/SimulateButton";
-import SunChip from "@/components/hud/SunChip";
 import Timeline from "@/components/hud/Timeline";
 import Drawer from "@/components/ui/Drawer";
 import { runCompare } from "@/lib/actions";
@@ -159,9 +156,7 @@ export default function Home() {
           <span className="h-px mx-2.5 bg-white/[0.07]" aria-hidden />
           <InsightChip compact />
           <span className="h-px mx-2.5 bg-white/[0.07]" aria-hidden />
-          <MyLocation compact />
           <SimulateButton compact />
-          <InterventionPanel compact />
         </div>
       )}
 
@@ -184,26 +179,31 @@ export default function Home() {
            which reads as "close the directions" rather than "stop pretending I am
            here". This is that control and nothing else. */
         <div className="absolute right-4 bottom-5 z-30 pointer-events-auto">
-          <MyLocation />
+          <SimulateButton />
         </div>
       ) : wide ? (
-        <div className="absolute bottom-0 inset-x-0 z-30 p-5 pointer-events-none flex items-end gap-3">
-          <div className="pointer-events-auto shrink-0 flex flex-col items-start gap-2">
-            {/* The sun readout sits with the timeline: scrubbing moves both the sun in
-                the 3D sky and this number, which is what ties the two together. */}
-            <SunChip />
+        <>
+          {/* The micro-rest card is a fixed 340px, which is wider than the slack the
+              centred timeline leaves beside it, so in the bar itself it rode over the
+              scrubber. Above the bar it keeps its width and the timeline keeps its. */}
+          <div className="absolute right-5 bottom-[116px] z-30 pointer-events-auto">
             <MicroRestCard />
-            <InsightChip />
           </div>
-          <div className="pointer-events-auto flex-1 min-w-0 max-w-[600px] mx-auto">
-            <Timeline />
+          <div className="absolute bottom-0 inset-x-0 z-30 p-5 pointer-events-none flex items-end gap-3">
+            {/* An empty flex-1 on each side, so the timeline is centred on the screen
+                rather than on the gap the right-hand cluster happens to leave. */}
+            <div className="flex-1 min-w-0" aria-hidden />
+            <div className="pointer-events-auto w-[min(600px,100%)] shrink-0">
+              <Timeline />
+            </div>
+            <div className="flex-1 min-w-0 flex justify-end">
+              <div className="pointer-events-auto flex items-end gap-3">
+                <InsightChip />
+                <SimulateButton />
+              </div>
+            </div>
           </div>
-          <div className="pointer-events-auto shrink-0 flex items-end gap-3">
-            <InterventionPanel />
-            <SimulateButton />
-            <MyLocation />
-          </div>
-        </div>
+        </>
       ) : (
         <div className="absolute inset-x-0 bottom-[calc(56px+env(safe-area-inset-bottom))] z-30 p-2 flex flex-col gap-2 pointer-events-none">
           {/* Same card as the desktop bar; the two layouts are separate trees, so a

@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDownUp, Bike, Bus, Car, Check, ChevronDown, Droplets, Footprints, Loader2, Moon, Route as RouteIcon, Sparkles, Sun, Thermometer, TreePine, TriangleAlert, Zap } from "lucide-react";
+import { ArrowDownUp, Bike, Bus, Car, Check, ChevronDown, Droplets, Footprints, Loader2, Moon, Route as RouteIcon, Sparkles, Thermometer, TreePine, TriangleAlert, Zap } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, type Route } from "@/lib/api";
@@ -206,26 +206,6 @@ export default function RoutePanel({ route }: { route: Route }) {
           </ul>
         </div>
       </Section>
-
-      {route.steps.length > 0 && (
-        <Section title="Directions" right={<span className="text-[11px] text-ink-500">{route.steps.length} steps</span>}>
-          <ol className="rounded-[22px] bg-white/[0.035] divide-y divide-white/[0.05]">
-            {route.steps.map((st) => (
-              <li key={st.index} className="flex items-start gap-3 px-4 py-2.5">
-                <span className="text-[11px] text-ink-500 tabular w-12 shrink-0 pt-0.5">{fmtDist(st.distance_m)}</span>
-                <span className="flex-1 min-w-0 text-[12.5px] text-ink-200">{st.instruction}</span>
-                {/* Marked per step, because the whole reason a step exists on this
-                    street rather than the faster one is what the sun is doing to it. */}
-                {st.exposure > 0.55 && (
-                  <span className="flex items-center gap-0.5 text-[10.5px] text-heat-4 shrink-0 pt-0.5" title="In direct sun">
-                    <Sun size={10} aria-hidden /> sun
-                  </span>
-                )}
-              </li>
-            ))}
-          </ol>
-        </Section>
-      )}
 
       {route.segments.length > 0 && (
         <Section title="Heat along the way" right={<span className="text-[11px] text-ink-500">updates with the timeline</span>}>

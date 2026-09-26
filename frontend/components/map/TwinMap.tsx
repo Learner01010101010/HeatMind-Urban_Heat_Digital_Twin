@@ -183,6 +183,11 @@ export default function TwinMap() {
     const host = document.createElement("div");
     host.style.cssText = "position:absolute;inset:0";
     el.current.appendChild(host);
+    // `load` is asynchronous, so under StrictMode's mount/unmount/remount the first
+    // map's load can fire after its own cleanup has already removed it. Publishing
+    // that corpse as `ready` left every consumer effect calling getSource() on a map
+    // with no style, which threw and took the whole page down with it.
+    let disposed = false;
     const map = new maplibregl.Map({
       container: host,
       // Every fragment cost in the scene — ground heat, buildings, canopy, the sun
@@ -289,12 +294,14 @@ export default function TwinMap() {
       map.addLayer({ id: "route-core", type: "line", source: "routes", filter: ["get", "sel"], layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": "#ffffff", "line-width": 1.5, "line-opacity": 0.85 } });
       addFlatMapDetails(map);
       addWaterStopLayers(map);
+      if (disposed) return;
       setReady(map);
     });
 
     const ro = new ResizeObserver(() => map.resize());
     ro.observe(el.current);
     return () => {
+      disposed = true;
       ro.disconnect();
       setReady(null);
       mapRef.current = null;
@@ -307,9 +314,12 @@ export default function TwinMap() {
   useEffect(() => {
     const map = ready;
     if (!ready || !map || !zone.data) return;
-    (map.getSource("buildings") as maplibregl.GeoJSONSource).setData(unpackBuildings(zone.data.buildings));
+    const buildings = map.getSource("buildings") as maplibregl.GeoJSONSource | undefined;
+    const water = map.getSource("water") as maplibregl.GeoJSONSource | undefined;
+    if (!buildings || !water) return;
+    buildings.setData(unpackBuildings(zone.data.buildings));
     setFlatZoneData(map, zone.data);
-    (map.getSource("water") as maplibregl.GeoJSONSource).setData({
+    water.setData({
       type: "FeatureCollection",
       features: zone.data.surfaces.features.filter((f) => f.properties?.kind === "water"),
     });
@@ -643,7 +653,9 @@ export default function TwinMap() {
     }
     equityCache.get(key)!.then((d) => {
       if (ctrl.dead || !mapRef.current) return;
-      (map.getSource("equity") as maplibregl.GeoJSONSource).setData(d.surface);
+      const equity = map.getSource("equity") as maplibregl.GeoJSONSource | undefined;
+      if (!equity) return;
+      equity.setData(d.surface);
     });
     return () => {
       ctrl.dead = true;
@@ -821,8 +833,10 @@ export default function TwinMap() {
     const route = compare?.routes.find((r) => r.id === selected);
     const along = new Set(route?.pois_along_route.map((p) => p.id) ?? []);
     // Water remains visible across the zone even after selecting a route.
+    const poiSrc = map.getSource("pois") as maplibregl.GeoJSONSource | undefined;
+    if (!poiSrc) return;
     setWaterStopData(map, pois.data, along);
-    (map.getSource("pois") as maplibregl.GeoJSONSource).setData({
+    poiSrc.setData({
       type: "FeatureCollection",
       features: pois.data.features
         .filter((f) => f.properties.source === "osm" || along.has(f.properties.id))
@@ -836,10 +850,13 @@ export default function TwinMap() {
     if (!ready || !map) return;
     const routes = compare?.routes ?? [];
     const time = useMap.getState().timeMin;
+    const routeSrc = map.getSource("routes") as maplibregl.GeoJSONSource | undefined;
+    const segSrc = map.getSource("route-seg") as maplibregl.GeoJSONSource | undefined;
+    if (!routeSrc || !segSrc) return;
     map.removeFeatureState({ source: "route-seg" });
     segmentColors.current.clear();
     const order = [...routes].sort((a, b) => (a.id === selected ? 1 : 0) - (b.id === selected ? 1 : 0));
-    (map.getSource("routes") as maplibregl.GeoJSONSource).setData({
+    routeSrc.setData({
       type: "FeatureCollection",
       features: order.map((r) => ({
         type: "Feature",
@@ -847,7 +864,7 @@ export default function TwinMap() {
         geometry: { type: "LineString", coordinates: r.geometry.map(([la, lo]) => [lo, la]) },
       })),
     });
-    (map.getSource("route-seg") as maplibregl.GeoJSONSource).setData({
+    segSrc.setData({
       type: "FeatureCollection",
       features: order.flatMap((r) =>
         r.segments.map((s, i) => ({

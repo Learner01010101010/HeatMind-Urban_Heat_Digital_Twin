@@ -1,9 +1,11 @@
 "use client";
 
-import { Loader2, RotateCcw, Zap } from "lucide-react";
+import { Loader2, Navigation, RotateCcw, X, Zap } from "lucide-react";
 import { useState } from "react";
 import { resetSimulation, runSimulate } from "@/lib/actions";
+import { stopSimulation, stopWatch, useGeo } from "@/lib/geolocation";
 import { fmtDelta } from "@/lib/heatColorScale";
+import { startNavigation, stopNavigation, useNav } from "@/lib/navigation";
 import { useMap, usePrefs } from "@/lib/store";
 
 const PRESETS = [
@@ -29,6 +31,43 @@ export default function SimulateButton({ compact = false }: { compact?: boolean 
   const [open, setOpen] = useState(false);
   const [d, setD] = useState(delta);
   const active = delta !== 0;
+
+  // ── the planned-trip run, moved here from the location control ──
+  // It is a simulation of being on the route, so it belongs with the other
+  // simulations rather than behind a button about where you actually are.
+  const set = useMap((s) => s.set);
+  const compare = useMap((s) => s.compare);
+  const selectedRouteId = useMap((s) => s.selectedRouteId);
+  const mode = useMap((s) => s.mode);
+  const geoStatus = useGeo((s) => s.status);
+  const navActive = useNav((s) => s.active);
+  const navRouteId = useNav((s) => s.routeId);
+  const progressM = useNav((s) => Math.floor(s.progressM));
+  const simSpeed = useNav((s) => s.simSpeed);
+
+  const route = compare?.routes.find((r) => r.id === selectedRouteId) ?? compare?.routes[0] ?? null;
+  const navRoute = compare?.routes.find((r) => r.id === navRouteId) ?? null;
+  const tripRunning = navActive && !!navRoute;
+  /** Anything fabricating a position, whatever started it. */
+  const simRunning = tripRunning || geoStatus === "simulated";
+  const tripPct = tripRunning && navRoute.distance_m > 0
+    ? Math.min(100, (progressM / navRoute.distance_m) * 100)
+    : 0;
+
+  const runTrip = () => {
+    if (!route) return;
+    set({ revealOn: true, selectedRouteId: route.id });
+    startNavigation(route, { simulate: true });
+    setOpen(false);
+  };
+
+  /** One stop for every fabricated position; hands the real one back. */
+  const stopAll = () => {
+    stopNavigation();
+    stopWatch();
+    stopSimulation();
+    useGeo.getState().set({ status: "idle", lat: null, lon: null, headingDeg: null, accuracyM: null });
+  };
 
   const apply = async (v: number) => {
     setD(v);
@@ -71,6 +110,71 @@ export default function SimulateButton({ compact = false }: { compact?: boolean 
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* ── run the planned trip ──
+                While something is already driving the position the only useful
+                question is how to stop it, so the way to start is replaced by the
+                way out rather than sitting next to it greyed out. */}
+            <div className="mt-4 pt-3 border-t border-white/10">
+              <div className="text-[10.5px] font-bold uppercase tracking-wider text-cool-300 mb-1.5">
+                {simRunning ? (tripRunning ? "Running the trip" : "Simulated walk") : "Trip playback"}
+              </div>
+
+              {simRunning ? (
+                <>
+                  <p className="text-[11px] text-ink-400 mb-2 leading-snug">
+                    {tripRunning
+                      ? `Moving along ${navRoute.label} at ${navRoute.speed_kmh ?? "—"} km/h${simSpeed > 1 ? ` · ${simSpeed}× playback` : ""}. This is a simulated position, not a fix.`
+                      : "A simulated pedestrian is walking the campus. This is not a real position."}
+                  </p>
+
+                  {tripRunning && (
+                    <div className="mb-2.5">
+                      <div className="h-1.5 rounded-full bg-white/[0.08] overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-[width] duration-300"
+                          style={{ width: `${tripPct}%`, background: navRoute.color }}
+                        />
+                      </div>
+                      <div className="flex justify-between text-[10.5px] text-ink-400 mt-1 tabular">
+                        <span>{(progressM / 1000).toFixed(2)} km</span>
+                        <span>
+                          {tripPct >= 99.5
+                            ? "arrived"
+                            : `${Math.max(0, (navRoute.distance_m - progressM) / 1000).toFixed(2)} km to go`}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={stopAll}
+                    className="press hm-sos flex items-center justify-center gap-2 w-full h-11 rounded-full text-[13.5px] font-semibold"
+                  >
+                    <X size={16} />
+                    Cancel the simulation
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={runTrip}
+                  disabled={!route}
+                  className="press flex items-center gap-2.5 w-full rounded-2xl px-3 py-2.5 text-left disabled:opacity-45 bg-white/[0.05] hover:bg-white/[0.09] disabled:hover:bg-white/[0.05]"
+                >
+                  <Navigation size={16} style={{ color: route?.color ?? "#6fbf5e" }} />
+                  <span className="flex-1 min-w-0">
+                    <div className="text-[13px] font-semibold text-ink-100">
+                      Run the planned trip in {mode === "twin" ? "3D" : "2D"}
+                    </div>
+                    <div className="text-[10.5px] text-ink-400 leading-tight">
+                      {route
+                        ? `${route.label} · ${route.speed_kmh ?? "—"} km/h by ${route.mode_label?.toLowerCase() ?? "foot"}, to the destination`
+                        : "Plan a route first — this follows the one on screen"}
+                    </div>
+                  </span>
+                </button>
+              )}
             </div>
 
             <div className="flex gap-2 mt-3">

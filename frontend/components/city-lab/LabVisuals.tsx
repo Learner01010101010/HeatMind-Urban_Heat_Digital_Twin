@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { heatColor } from "@/lib/heatColorScale";
-import { KIND_COLORS, type CoolingPlan, type LabCatalog, type ValidationResult } from "@/lib/cityLabApi";
+import { KIND_COLORS, type CoolingPlan, type LabCatalog } from "@/lib/cityLabApi";
 
 export function Stat({ label, value, hint, color = "#f3f3f2" }: { label: string; value: ReactNode; hint: string; color?: string }) {
   return <div className="rounded-2xl border border-white/10 bg-white/[0.035] p-4 min-w-0">
@@ -38,20 +38,5 @@ export function PlanningMap({ data, plan, after, active, onSelect }: { data: Lab
     <text x="26" y="49" fill="#a5b7b8" fontSize="10">Mapped streets · tap a numbered candidate</text>
     <text x="612" y="30" textAnchor="end" fill="#c3d5d6" fontSize="11">N ↑</text>
     <text x="18" y="461" fill="#a5b7b8" fontSize="10">Dot colour = modelled patch feels-like · dashed ring = proposal</text>
-  </svg>;
-}
-
-export function ValidationPlot({ result }: { result: ValidationResult }) {
-  const values = result.rows.flatMap((r) => [r.predicted_c, r.observed_c]);
-  const low = Math.floor(Math.min(...values) - 2), high = Math.ceil(Math.max(...values) + 2);
-  const x = (v: number) => 55 + (v - low) / (high - low) * 480;
-  const y = (v: number) => 290 - (v - low) / (high - low) * 260;
-  return <svg viewBox="0 0 600 340" className="w-full rounded-2xl bg-white/[0.025] border border-white/10" role="img" aria-label="Observed versus predicted temperature scatter plot. Points on the diagonal are exact matches.">
-    {Array.from({ length: 6 }, (_, i) => low + (high - low) * i / 5).map((v) => <g key={v}><line x1={x(v)} x2={x(v)} y1="30" y2="290" stroke="#ffffff12" /><line x1="55" x2="535" y1={y(v)} y2={y(v)} stroke="#ffffff12" /><text x={x(v)} y="309" textAnchor="middle" fill="#999" fontSize="10">{v.toFixed(1)}</text><text x="47" y={y(v) + 3} textAnchor="end" fill="#999" fontSize="10">{v.toFixed(1)}</text></g>)}
-    <line x1={x(low)} y1={y(low)} x2={x(high)} y2={y(high)} stroke="#8ad8b0" strokeDasharray="5 4" />
-    {result.rows.map((r, i) => <circle key={i} cx={x(r.observed_c)} cy={y(r.predicted_c)} r="5" fill={Math.abs(r.error_c) <= result.tolerance_c ? "#a9d7fa" : "#ffc48a"} fillOpacity=".85"><title>{r.label}: observed {r.observed_c}°C, predicted {r.predicted_c}°C, error {r.error_c > 0 ? "+" : ""}{r.error_c}°C</title></circle>)}
-    <text x="300" y="333" textAnchor="middle" fill="#ccc" fontSize="11">Observed temperature (°C)</text><text transform="translate(15 170) rotate(-90)" textAnchor="middle" fill="#ccc" fontSize="11">Predicted temperature (°C)</text>
-    <text x="545" y="22" textAnchor="end" fill="#8ad8b0" fontSize="10">Dashed line = exact agreement</text>
-    {result.source === "synthetic_demo" && <text x="55" y="18" fill="#ffc48a" fontSize="10" fontWeight="600">SYNTHETIC DEMO</text>}
   </svg>;
 }

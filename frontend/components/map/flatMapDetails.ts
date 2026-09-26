@@ -66,13 +66,15 @@ export function addWaterStopLayers(map: Map) {
 }
 
 export function setFlatZoneData(map: Map, zone: ZoneData) {
-  (map.getSource("streets-2d") as GeoJSONSource).setData(zone.roads);
-  (map.getSource("landcover-2d") as GeoJSONSource).setData({ type: "FeatureCollection", features: zone.surfaces.features.filter((f) => f.properties?.kind !== "water") });
-  (map.getSource("places-2d") as GeoJSONSource).setData({ type: "FeatureCollection", features: zone.places.filter((p) => /college|school|hospital|park|garden|campus|university/i.test(`${p.kind} ${p.name}`)).map((p) => ({ type: "Feature", properties: { name: p.name }, geometry: { type: "Point", coordinates: [p.lon, p.lat] } })) });
+  const streets = map.getSource("streets-2d") as GeoJSONSource | undefined;
+  if (!streets) return;
+  streets.setData(zone.roads);
+  (map.getSource("landcover-2d") as GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: zone.surfaces.features.filter((f) => f.properties?.kind !== "water") });
+  (map.getSource("places-2d") as GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: zone.places.filter((p) => /college|school|hospital|park|garden|campus|university/i.test(`${p.kind} ${p.name}`)).map((p) => ({ type: "Feature", properties: { name: p.name }, geometry: { type: "Point", coordinates: [p.lon, p.lat] } })) });
 }
 
 export function setWaterStopData(map: Map, pois: GeoJSON.FeatureCollection<GeoJSON.Point, Poi>, along: Set<string>) {
-  (map.getSource("water-stops") as GeoJSONSource).setData({ type: "FeatureCollection", features: pois.features.filter((f) => f.properties.source === "osm" || along.has(f.properties.id)).map((f) => ({ ...f, properties: { ...f.properties, on: along.has(f.properties.id) } })) });
+  (map.getSource("water-stops") as GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features: pois.features.filter((f) => f.properties.source === "osm" || along.has(f.properties.id)).map((f) => ({ ...f, properties: { ...f.properties, on: along.has(f.properties.id) } })) });
 }
 
 export function setFlatDetailsVisible(map: Map, visible: boolean) {

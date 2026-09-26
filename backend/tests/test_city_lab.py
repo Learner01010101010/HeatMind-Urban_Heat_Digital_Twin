@@ -1,12 +1,10 @@
 import unittest
-from datetime import timedelta
 from unittest.mock import patch
 
 from fastapi import HTTPException
 from app.routers.city_lab import PlanRequest, create_plan
 
-from app.services.city_lab import parse_readings, plan, validate_readings
-from app.services.weather import base_time
+from app.services.city_lab import KINDS, plan
 
 
 def result(before=40, after=37, cells=10):
@@ -14,30 +12,65 @@ def result(before=40, after=37, cells=10):
             "delta_c": after - before, "cells_affected": cells}
 
 
+def site(sid, choices, lat=18.44, lon=73.83, plantable=True, ground=900):
+    return {"id": sid, "name": sid.upper(), "lat": lat, "lon": lon, "choices": choices,
+            "feasible": {"trees": {"ok": plantable, "open_ground_m2": ground,
+                                   "reason": "" if plantable else "no open ground"}}}
+
+
 class CityLabTests(unittest.TestCase):
     def setUp(self):
         self.data = {"sites": [
-            {"id": "a", "name": "A", "lat": 18.44, "lon": 73.83, "choices": {"trees": result(), "shade_structure": result(after=35)}},
-            {"id": "b", "name": "B", "lat": 18.45, "lon": 73.84, "choices": {"trees": result(before=38, after=36, cells=20)}},
+            site("a", {"trees": result(), "shade_structure": result(after=35)}),
+            site("b", {"trees": result(before=38, after=36, cells=20)}, lat=18.45, lon=73.84),
         ]}
 
-    def csv(self, rows, extra=""):
-        return "lat,lon,time,metric,observed_c,predicted_c" + extra + "\n" + "\n".join(rows)
-
-    def test_budget_and_weighted_patch_results(self):
+    def test_weighted_patch_results_and_zero_budget(self):
         out = plan(self.data, 50000, {})
-        self.assertEqual(out["spent"], 50000)
         self.assertEqual(len(out["projects"]), 2)
+        self.assertEqual(out["spent"], 2 * KINDS["trees"]["cost"])
         self.assertEqual(out["evaluated_ground_m2"], 3000)
         self.assertEqual(out["before_c"], 38.7)
         self.assertEqual(out["after_c"], 36.3)
         self.assertEqual(out["reduction_c"], 2.33)
-        self.assertEqual(out["remaining"], 0)
         self.assertEqual(plan(self.data, 0, {})["projects"], [])
+        # The catalogue is read-only to the planner.
         self.assertEqual(self.data["sites"][0]["choices"]["trees"]["after"]["feels_c"], 37)
 
+    def test_spare_budget_is_spent_upgrading_to_the_better_fix(self):
+        """A budget that fits the pricier fix should end up using it.
+
+        The greedy pass ranks by relief per rupee, which picks two cheap tree
+        patches and stops with most of the money unspent. The fill pass exists to
+        notice that site A can take a shade structure that cools more.
+        """
+        cheap = plan(self.data, 20000, {})
+        self.assertEqual(cheap["spent"], 16000)
+        rich = plan(self.data, 150000, {})
+        self.assertEqual(dict(zip([p["site_id"] for p in rich["projects"]],
+                                  [p["kind"] for p in rich["projects"]])),
+                         {"a": "shade_structure", "b": "trees"})
+        self.assertEqual(rich["spent"], KINDS["shade_structure"]["cost"] + KINDS["trees"]["cost"])
+        self.assertGreater(rich["spent"], cheap["spent"])
+
+    def test_allocation_note_explains_any_shortfall(self):
+        self.assertEqual(plan(self.data, 142000, {})["allocation_note"], "Fully allocated.")
+        self.assertIn("below the cheapest fix", plan(self.data, 145000, {})["allocation_note"])
+        big = plan(self.data, 900000, {})
+        self.assertGreater(big["remaining"], 0)
+        self.assertIn("candidate sites", big["allocation_note"])
+
+    def test_trees_are_refused_where_there_is_no_ground_to_plant_them(self):
+        """A mature canopy cannot be proposed on a patch that is built over."""
+        blocked = {"sites": [site("a", {"trees": result()}, plantable=False, ground=200)]}
+        with self.assertRaises(ValueError) as error:
+            plan(blocked, 500000, {}, [{"site_id": "a", "kind": "trees"}])
+        self.assertIn("Mature tree canopy", str(error.exception))
+        # ...and the suggester does not offer it either.
+        self.assertEqual(plan(blocked, 500000, {})["projects"], [])
+
     def test_water_proposal_cannot_claim_temperature_reduction(self):
-        out = plan(self.data, 30000, {}, [{"site_id": "a", "kind": "water_refill"}])
+        out = plan(self.data, 500000, {}, [{"site_id": "a", "kind": "water_refill"}])
         self.assertEqual(out["proposed_water_points"], 1)
         self.assertEqual(out["evaluated_ground_m2"], 0)
         self.assertEqual(out["reduction_c"], 0)
@@ -48,53 +81,20 @@ class CityLabTests(unittest.TestCase):
                          [{"site_id": "a", "kind": "trees"}] * 2,
                          [{"site_id": "a", "kind": "shade_structure"}]):
             with self.assertRaises(ValueError):
-                plan(self.data, 25000, {}, projects)
+                plan(self.data, 20000, {}, projects)
+
+    def test_unit_costs_carry_their_arithmetic_and_a_source(self):
+        """A number a city might act on has to say where it came from."""
+        for kind, info in KINDS.items():
+            self.assertGreater(info["cost"], 0, kind)
+            self.assertGreater(len(info["basis"]), 60, kind)
+            self.assertTrue(info["source"].strip(), kind)
 
     def test_changed_live_snapshot_requires_refresh(self):
         with patch("app.routers.city_lab.catalog", return_value={**self.data, "time": "new"}):
             with self.assertRaises(HTTPException) as error:
                 create_plan(PlanRequest(catalog_time="old"))
             self.assertEqual(error.exception.status_code, 422)
-
-    def test_known_error_metrics_and_temperature_matching(self):
-        rows = parse_readings(self.csv([
-            "18.44,73.83,2026-09-26T13:30:00+05:30,surface_c,30,32",
-            "18.45,73.84,2026-09-26T13:30:00+05:30,surface_c,30,29",
-        ]))
-        out = validate_readings(rows, 1)
-        self.assertEqual(out["stats"]["mae_c"], 1.5)
-        self.assertEqual(out["stats"]["rmse_c"], 1.581)
-        self.assertEqual(out["stats"]["bias_c"], .5)
-        self.assertEqual(out["stats"]["within_tolerance_pct"], 50)
-        self.assertEqual(out["source"], "uploaded_observations")
-
-    def test_rejects_wrong_metric_outside_zone_nan_naive_time_duplicates(self):
-        base = "18.44,73.83,2026-09-26T13:30:00+05:30,surface_c,30,32"
-        for rows in ([base, base.replace("surface_c", "air_c").replace("18.44", "18.45")],
-                     [base.replace("18.44", "90")], [base.replace(",30,", ",nan,")],
-                     [base.replace("+05:30", "")], [base, base],
-                     [base, base.replace("13:30:00+05:30", "08:00:00Z")]):
-            with self.assertRaises(ValueError):
-                parse_readings(self.csv(rows))
-
-    def test_imported_synthetic_demo_stays_labelled(self):
-        rows = parse_readings(self.csv(["18.44,73.83,2026-09-26T13:30:00+05:30,surface_c,30,32,synthetic_demo"], ",reference_source"))
-        self.assertEqual(validate_readings(rows)["source"], "synthetic_demo")
-
-    def test_old_readings_without_saved_prediction_do_not_claim_accuracy(self):
-        when = (base_time() - timedelta(days=2)).isoformat()
-        rows = parse_readings(self.csv([f"18.44,73.83,{when},surface_c,30,"]))
-        with patch("app.services.city_lab.get_twin") as twin:
-            with self.assertRaises(ValueError):
-                validate_readings(rows)
-            twin.assert_not_called()
-
-    def test_fallback_weather_cannot_be_reported_as_sensor_validation(self):
-        rows = parse_readings(self.csv([f"18.44,73.83,{base_time().isoformat()},surface_c,30,"]))
-        with patch("app.services.city_lab.get_twin") as twin:
-            twin.return_value.frame.return_value.weather.source = "climatology_fallback"
-            with self.assertRaises(ValueError):
-                validate_readings(rows)
 
 
 if __name__ == "__main__":
