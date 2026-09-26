@@ -6,6 +6,8 @@
 
 Built from the [PRD](docs/HeatMind_AI_PRD.md). Pitch walkthrough: [docs/demo-script.md](docs/demo-script.md).
 
+Multi-algorithm routing and continuous navigation checks: [route engine guide](docs/route-engine.md).
+
 ---
 
 ## Quick start
@@ -230,7 +232,7 @@ OSM access, hours, fees and accessibility tags where recorded. Linked Wikimedia
 Commons/Wikidata photos include credits; Mapillary fallback is labelled nearby
 street imagery with distance and capture date. Missing coverage never substitutes
 a stock photo. Estimated points and shops are not public refill guarantees.
-Gemini trip tips are opt-in, use one bounded request, and never change the route.
+Route trip tips use a local rule-based expert system, with no Gemini call or quota.
 
 Validation: `python -m unittest discover -s tests -v` from `backend/`; `npm run build`
 and targeted ESLint from `frontend/`.
@@ -259,6 +261,45 @@ predictions, only the last 24 hours with matching weather can be reconstructed;
 this is not an archived forecast. Uploaded references are user-supplied, not
 independently verified. Data is compared in memory and never recalibrates the
 model. Exported synthetic results retain their demo label if imported again.
+
+## Live micro-rest scheduling
+
+For Delivery Rider / Outdoor Worker, the main map's Micro-rest card accepts a
+pickup wait of 1–60 minutes. This starts a real countdown with a fixed pickup
+location; no order-provider feed is connected. The new `/api/micro-rest/recommend`
+endpoint reuses the existing street Dijkstra and heat twin, excludes seeded,
+private and explicitly closed amenities, and estimates walking out and back to
+pickup. Walking pace is capped at 1.4 m/s (the rider's vehicle pace is not walking).
+ETAs include 20% padding; at least 1 minute rest and a 1 minute return buffer must
+fit before shade/water/seating/heat-relief benefits rank the feasible stops.
+
+The card refreshes every 30 seconds or when the location bucket changes (~25 m),
+rechecks the deadline every second, pauses on poor/outside GPS and withdraws stale
+or infeasible advice. It shows the timing split, leave-by time, source labels and
+a map focus button. OSM opening/access and modelled shade remain unverified; no
+arrival guarantee or live pickup status is claimed. Hide/show keeps the countdown;
+"Pickup ready / end wait" ends it. Automatic pickup deadlines require a future
+authorized integration with an order provider. No routing, persona or heat-model
+calibration is changed.
+
+## Local route recommendations
+
+Every route card includes a short recommendation below its metrics; the planner's
+recommended ID stays highlighted in green even when another route is selected.
+The local symbolic expert system reads the existing heat dose, risk, street shade,
+public facilities, estimated industrial heat and available traffic coverage.
+It explains benefits and travel-time trade-offs without changing ranking, scoring,
+routes or persona weights. Its label states "Local AI · rule-based": this is an
+expert system, not a trained language model. Recommendations describe departure
+conditions, not a new ranking of the timeline's forecast previews. Transit is
+described separately and its assumed waiting time remains explicit.
+
+The route trip-tips button also runs locally. It needs no API key or download and
+has no provider usage quota. Seeded/private facilities and shops are not promoted
+as drinking-water sources; mapped access remains unverified. The separate City
+Ops Advisory keeps its existing Gemini integration. Check the local inference
+rules with `node --experimental-strip-types --experimental-loader ./scripts/ts-test-loader.mjs --test scripts/test-route-recommendation.mjs`
+from `frontend/` (Node 22.6+).
 
 ## Stack
 

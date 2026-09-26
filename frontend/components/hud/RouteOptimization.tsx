@@ -49,8 +49,9 @@ export default function RouteOptimization({ route }: { route: Route }) {
     </div>
     <details className="text-[10px] text-ink-400"><summary className="cursor-pointer">How these checks work · index {c.score}/100</summary><p className="mt-2">{c.note}</p><p className="mt-1">{c.industrial.note}</p><p className="mt-1">{c.traffic.note}</p></details>
     <button onClick={getTips} disabled={busy} className="w-full rounded-xl bg-cool-300/10 text-cool-300 py-2.5 text-[12px] flex items-center justify-center gap-2 disabled:opacity-50">
-      {busy ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}{busy ? "Preparing tips…" : "Get AI trip tips"}
+      {busy ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}{busy ? "Preparing tips…" : "Get local AI trip tips"}
     </button>
+    <p className="text-[10px] text-ink-400">Rule-based expert system · no API key or usage quota.</p>
     {tips?.id === route.id && <ul aria-live="polite" className="space-y-2 text-[12px] text-ink-200">{tips.text.map((tip) => <li key={tip} className="rounded-xl bg-cool-300/5 p-2.5">{tip}</li>)}</ul>}
   </section>;
 }

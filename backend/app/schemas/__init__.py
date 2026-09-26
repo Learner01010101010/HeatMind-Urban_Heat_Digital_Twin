@@ -9,6 +9,7 @@ Persona = Literal["student", "worker", "senior", "cyclist", "gig_worker"]
 Scenario = Literal["demo", "live"]
 #: How the trip is made, independent of who is making it. See services/modes.py.
 TravelMode = Literal["walk", "cycle", "bike", "car", "bus"]
+RouteObjective = Literal["balanced", "fastest", "shortest", "coolest"]
 
 
 class LatLon(BaseModel):
@@ -26,6 +27,16 @@ class CompareRequest(BaseModel):
     temp_delta_c: float = Field(0.0, ge=-10, le=15)
     mode: TravelMode = Field("walk", description="Travel mode; sets speed, usable streets and sun exposure")
     senior: bool = Field(False, description="Senior Mode: bias the search toward streets with a mapped bench or toilet within 50 m")
+    objective: RouteObjective = "balanced"
+
+
+class RecheckRequest(BaseModel):
+    compare_id: str = Field(..., min_length=1, max_length=64)
+    route_id: str = Field(..., min_length=1, max_length=64)
+    position: LatLon | None = None
+    objective: RouteObjective | None = None
+    off_route: bool = False
+    temp_delta_c: float = Field(0.0, ge=-10, le=15)
 
 
 class SimulateParams(BaseModel):

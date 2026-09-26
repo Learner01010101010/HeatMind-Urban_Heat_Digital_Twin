@@ -15,6 +15,7 @@ import RiskRing from "@/components/ui/RiskRing";
 import { StartNavButton } from "./NavHud";
 import { AdvisoryRoutePermission } from "./CityOpsAdvisory";
 import RouteOptimization from "./RouteOptimization";
+import RouteRecommendationLine from "./RouteRecommendationLine";
 
 /** Glyph per travel mode, matching ModeSelector. */
 const MODE_ICON: Record<string, typeof Footprints> = {
@@ -336,6 +337,7 @@ export default function RoutePanel({ route }: { route: Route }) {
           Open Heat Passport →
         </Link>
       )}
+      <RouteRecommendationLine route={route} />
     </div>
   );
 }

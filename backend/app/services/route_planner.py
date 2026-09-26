@@ -22,6 +22,7 @@ from .routing_service import Path, StreetGraph
 from .zone import CODE_LABEL
 from .route_classifier import classify, explain_choice, usable_stop
 from .traffic import traffic_service
+from .multi_route_engine import OBJECTIVES, augment_candidates, describe_engine, legal_edges, objective_choices, record_examples
 
 # Four separable route accents, none of them blue and none of them borrowed from
 # the heat ramp, so a route chip can never be misread as a temperature.
@@ -143,9 +144,11 @@ class RoutePlanner:
     def compare(self, *, origin: tuple[float, float], destination: tuple[float, float], persona: str,
                 scenario: str, depart: datetime, temp_delta: float = 0.0, extra_paths: list[Path] | None = None,
                 compare_id: str | None = None, mode: str | None = None,
-                senior: bool = False) -> dict:
+                senior: bool = False, objective: str = "balanced") -> dict:
         if persona not in PERSONAS:
             raise ValueError(f"unknown persona '{persona}'")
+        if objective not in OBJECTIVES:
+            raise ValueError(f"unknown route objective '{objective}'")
         P = PERSONAS[persona]
         M = modes_mod.get(mode)
         g = self.graph
@@ -198,6 +201,7 @@ class RoutePlanner:
             penalty = penalty * (1.0 - REST_RELIEF * self._rest_proximity())
 
         paths = g.candidate_paths(src, dst, piece_seconds, penalty, mode=street_mode)
+        paths = augment_candidates(g, src, dst, piece_seconds, paths, street_mode)
         traffic = traffic_service.route_field(g, paths, depart)
         free_speed = modes_mod.speed_ms(street_mode, P, congestion=0)
         free_seconds = g.p_len / free_speed
@@ -214,11 +218,15 @@ class RoutePlanner:
             if senior or street_mode.key in ("walk", "cycle"):
                 penalty *= 1 - REST_RELIEF * self._rest_proximity()
             paths = g.candidate_paths(src, dst, piece_seconds, penalty, mode=street_mode)
+            paths = augment_candidates(g, src, dst, piece_seconds, paths, street_mode, traffic)
             paths = [p for p in paths if not traffic["closed"][g.path_pieces(p)[0]].any()] if street_mode.key in ("car", "bike") else paths
         if not paths:
             raise ValueError(f"No {M.label.lower()} connection between these points.")
         pinned_ids: set[int] = set()
+        allowed = legal_edges(g, street_mode, traffic)
         for ep in extra_paths or []:
+            if not all(allowed[e] for e in g.edge_ids(ep)):
+                continue
             ids = g.edge_ids(ep)
             dup = next((i for i, p in enumerate(paths) if g.edge_ids(p) == ids), None)
             if dup is None:
@@ -260,13 +268,9 @@ class RoutePlanner:
         # questions. It is carried alongside with its own label and its own score, and
         # the rider does the comparison the app should not pretend to make for them.
         street = [r for r in routes if "transit" not in r["tags"]] or routes
-        fastest = min(street, key=lambda r: r["metrics"]["duration_min"])
-        coolest = min(street, key=lambda r: (r["metrics"]["heat_dose"], r["heat_risk_score"]))
-        limit = fastest["metrics"]["duration_min"] * 1.5 + 4
-        eligible = [r for r in street if r["metrics"]["duration_min"] <= limit] or street
-        best_alt = min(eligible, key=lambda r: (r["optimization"]["score"], r["metrics"]["duration_min"]))
-        # Only send people on a detour when it meaningfully lowers their risk
-        recommended = best_alt if best_alt["optimization"]["score"] <= fastest["optimization"]["score"] - 2 else fastest
+        choices = objective_choices(street)
+        fastest, coolest = choices["fastest"], choices["coolest"]
+        recommended = choices[objective]
         for r in street:
             explain_choice(r, fastest)
         for r in routes:
@@ -274,6 +278,8 @@ class RoutePlanner:
                 r["tags"].append("fastest")
             if r is coolest:
                 r["tags"].append("coolest")
+            if r is choices["shortest"]:
+                r["tags"].append("shortest")
             if r is recommended:
                 r["tags"].append("recommended")
         routes.sort(key=lambda r: ("transit" in r["tags"], 0 if r is recommended else 1,
@@ -353,6 +359,7 @@ class RoutePlanner:
             r["explanation"] = explain(r, ref, persona, f0.when.isoformat(), f0.elev > 0)
 
         rec = recommended
+        engine = describe_engine(routes, objective)
         best_i = int(np.argmin([fc["score"] for fc in rec["forecast"]]))
         best = rec["forecast"][best_i]
         now_score = rec["forecast"][0]["score"]
@@ -372,6 +379,7 @@ class RoutePlanner:
             "destination": {"lat": destination[0], "lon": destination[1], "snapped": list(g.node_ll[dst])},
             "conditions": self.twin.describe(f0),
             "recommended_id": rec["id"],
+            "route_engine": engine,
             "best_departure": {
                 "offset_min": best["offset_min"], "time": best["time"], "score": best["score"],
                 "score_now": now_score, "improvement": round(now_score - best["score"], 1),
@@ -382,10 +390,11 @@ class RoutePlanner:
             "transit": transit_block,
             "routes": [{k: v for k, v in r.items() if not k.startswith("_")} for r in routes],
         }
+        engine["training"] = record_examples(result)
         with self._lock:
             self._store[cid] = {
                 "origin": origin, "destination": destination, "persona": persona, "scenario": scenario,
-                "mode": M.key, "depart": depart, "temp_delta": temp_delta,
+                "mode": M.key, "depart": depart, "temp_delta": temp_delta, "senior": senior, "objective": objective,
                 "paths": {r["id"]: paths[r["_path_index"]] for r in routes
                           if r["_path_index"] < len(paths)},
                 "recommended_id": rec["id"], "result": result,
@@ -514,7 +523,7 @@ class RoutePlanner:
             "metrics": scored0["metrics"], "pois_along_route": along, "segments": segs, "forecast": forecast,
             "steps": navigation.steps_from_segments(segs, total, speed_ms),
             "breaks": breaks, "mode": M.key, "mode_label": M.label,
-            "speed_kmh": round(speed_ms * 3.6, 1),
+            "speed_kmh": round(total / max(scored0["metrics"]["duration_min"] * 60, 1) * 3.6, 1),
         }
         if traffic is not None:
             cond = self._along_walk(walk_min, stacks, intens)
@@ -676,7 +685,7 @@ class RoutePlanner:
         new = self.compare(origin=st["origin"], destination=st["destination"], persona=st["persona"],
                            scenario=st["scenario"], depart=st["depart"] + timedelta(minutes=time_offset_min),
                            temp_delta=temp_delta_c, extra_paths=[current_path] if current_path else None,
-                           mode=st.get("mode"))
+                           mode=st.get("mode"), senior=st.get("senior", False), objective=st.get("objective", "balanced"))
         cur_new = next((r for r in new["routes"] if "current" in r["tags"]), None)
         rec_new = next(r for r in new["routes"] if r["id"] == new["recommended_id"])
         reroute = None
