@@ -195,12 +195,20 @@ def _undo_float_predictor(buf: bytes, tw: int, th: int) -> np.ndarray:
     """Reverse TIFF predictor 3 on a float32 tile.
 
     Predictor 3 does two things a plain read does not undo: each row is stored as four
-    byte-planes (all the high bytes, then the next, ...), and within a plane the bytes
-    are horizontal differences. So the row is cumulatively summed byte-wise, then the
-    planes are interleaved back into floats, most significant byte first.
+    byte-planes (all the high bytes, then the next, ...), and the bytes are horizontal
+    differences. So the row is cumulatively summed byte-wise, then the planes are
+    interleaved back into floats, most significant byte first.
+
+    The accumulation runs across the **whole row**, all four planes as one sequence,
+    not independently within each plane. libtiff's fpAcc walks `cp[stride] += cp[0]`
+    from the first byte of the row to the last with no regard for plane boundaries,
+    so the first byte of the exponent plane continues from the last byte of the sign
+    plane. Accumulating per plane instead decodes correctly only where a plane
+    happens to start at a byte the difference did not carry into — which is why this
+    read clean data out of one DEM tile and 1,600 m mountains out of the next.
     """
-    a = np.frombuffer(buf, dtype=np.uint8).reshape(th, 4, tw)
-    a = np.cumsum(a, axis=2, dtype=np.uint32).astype(np.uint8)
+    a = np.frombuffer(buf, dtype=np.uint8).reshape(th, 4 * tw)
+    a = np.cumsum(a, axis=1, dtype=np.uint32).astype(np.uint8).reshape(th, 4, tw)
     out = np.empty((th, tw, 4), dtype=np.uint8)
     for i in range(4):
         out[:, :, 3 - i] = a[:, i, :]

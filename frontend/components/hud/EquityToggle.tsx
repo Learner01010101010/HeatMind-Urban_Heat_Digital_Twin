@@ -42,9 +42,8 @@ export default function EquityToggle({ compact = false }: { compact?: boolean })
                 has to be on screen. Blue is a low index, yellow a high one. */}
             <div className="mt-3">
               <div className="h-2 rounded-full" style={{ background: "var(--vuln-gradient)" }} />
-              <div className="flex justify-between text-[9.5px] text-ink-400 mt-1">
-                <span>Lower index · cooler</span>
-                <span>Higher index · hotter</span>
+              <div className="flex justify-between text-[9.5px] text-ink-400 mt-1 tabular">
+                <span>0</span><span>10</span><span>20</span><span>30</span><span>40</span><span>50+</span>
               </div>
             </div>
             {summary && (
