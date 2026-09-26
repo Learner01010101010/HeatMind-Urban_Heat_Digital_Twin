@@ -722,13 +722,13 @@ export default function TwinMap() {
   // elevation every water dot, POI and endpoint pin was left buried in the hillside
   // it is meant to be standing on.
   //
-  // So they are nudged up the screen by however many pixels their own ground height
-  // works out to. The scale factor is sin(pitch), not cos: looking straight down
-  // (pitch 0) a vertical offset moves nothing on screen at all, and the nearer the
-  // camera gets to the horizon the more of that height you see. Getting it the wrong
-  // way round applied less than half the needed lift at the twin's 62-66 degrees —
-  // and the error grows as you zoom in, because the same metres are worth more
-  // pixels, which is exactly when the dots sank back under the ground.
+  // The shift comes from the layer's own camera, not from arithmetic on pitch and
+  // metres-per-pixel. Two attempts at the closed form were wrong — first cos where
+  // it needed sin, then still short, because a perspective camera does not scale a
+  // vertical offset by any function of pitch alone: how many pixels a metre of
+  // height is worth depends on the point's distance from the eye, which across a
+  // 9 km corridor varies enormously. Asking the matrix that draws the terrain where
+  // the ground went cannot disagree with the terrain.
   //
   // Runs on move, zoom and pitch because all three change the conversion, and each
   // marker's own anchoring offset is preserved rather than overwritten.
@@ -739,8 +739,6 @@ export default function TwinMap() {
     const apply = () => {
       const layer = layerRef.current;
       const twin = mode === "twin";
-      const pitch = (map.getPitch() * Math.PI) / 180;
-      const zoom = map.getZoom();
       const lists: maplibregl.Marker[][] = [
         meMarker.current ? [meMarker.current] : [],
         odMarkers.current,
@@ -758,25 +756,31 @@ export default function TwinMap() {
             base = [o.x, o.y];
             baseOffsets.current.set(m, base);
           }
-          const h = twin && layer ? layer.elevationAt(m.getLngLat().lat, m.getLngLat().lng) : 0;
-          if (h <= 0) {
+          if (!twin || !layer) {
             m.setOffset(base);
             continue;
           }
-          const mpp = (156543.03392 * Math.cos((m.getLngLat().lat * Math.PI) / 180)) / Math.pow(2, zoom);
-          m.setOffset([base[0], base[1] - (h / mpp) * Math.sin(pitch)]);
+          const ll = m.getLngLat();
+          const { dx, dy } = layer.screenLiftPx(ll.lat, ll.lng);
+          m.setOffset([base[0] + dx, base[1] + dy]);
         }
       }
     };
 
     apply();
+    // "render" as well as the gesture events: the camera matrix this reads is only
+    // up to date once the custom layer has drawn a frame with it, and the twin
+    // repaints for reasons the map never hears about — the sun moving, the timeline
+    // playing, the corridor rebuilding.
     map.on("move", apply);
     map.on("zoom", apply);
     map.on("pitch", apply);
+    map.on("render", apply);
     return () => {
       map.off("move", apply);
       map.off("zoom", apply);
       map.off("pitch", apply);
+      map.off("render", apply);
     };
   }, [ready, mode, compare, selected, pois.data, layerEpoch]);
 
@@ -826,6 +830,11 @@ export default function TwinMap() {
       const nav = useNav.getState();
       const along = alongRoute(geometry, cum, nav.active && nav.routeId === route.id ? nav.progressM : 0);
       marker.setLngLat([along.position[1], along.position[0]]);
+      // Stand it on the terrain too. This one is not in the shared marker sweep
+      // because it already moves every frame and its position changes under it, so
+      // it takes its own lift here rather than waiting for a map event.
+      const lift = layerRef.current?.screenLiftPx(along.position[0], along.position[1]);
+      marker.setOffset(lift ? [lift.dx, lift.dy] : [0, 0]);
       // Damp the heading the same way the camera does, so the two do not disagree
       // by a few degrees every frame on a curving street.
       if (shownBearing === null) shownBearing = along.bearing;

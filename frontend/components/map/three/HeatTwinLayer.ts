@@ -710,6 +710,41 @@ export class HeatTwinLayer implements maplibregl.CustomLayerInterface {
     return ((hi[i] * 256 + lo[i]) / 65535) * t.spanM;
   }
 
+  /**
+   * How far up the screen a point at this location sits once it is on the terrain.
+   *
+   * Returns the pixel offset between the point drawn on the basemap plane and the
+   * same point drawn on the ground the twin actually renders — which is exactly what
+   * an HTML marker has to be shifted by to stand on that ground.
+   *
+   * Computed with the layer's own camera rather than from pitch and metres-per-pixel.
+   * The hand-rolled version was wrong twice: first with cos where it needed sin, then
+   * still short, because a perspective camera does not scale a vertical offset by a
+   * function of pitch alone — how many pixels a metre of height is worth depends on
+   * how far the point is from the eye, and across a 9 km corridor that varies by a
+   * lot. Projecting the same two points through the same matrix that draws the
+   * terrain cannot disagree with the terrain.
+   */
+  screenLiftPx(lat: number, lon: number): { dx: number; dy: number } {
+    const h = this.elevationAt(lat, lon);
+    if (h <= 0 || !this.map) return { dx: 0, dy: 0 };
+    const [x, y] = this.fields.origin.toXY(lat, lon);
+    const m = this.camera.projectionMatrix;
+    const cv = this.map.getCanvas();
+    const w = cv.clientWidth || cv.width;
+    const ht = cv.clientHeight || cv.height;
+
+    const at = (z: number) => {
+      const v = new THREE.Vector4(x, y, z, 1).applyMatrix4(m);
+      if (v.w <= 0) return null; // behind the camera
+      return { sx: ((v.x / v.w) * 0.5 + 0.5) * w, sy: (0.5 - (v.y / v.w) * 0.5) * ht };
+    };
+    const g = at(0);
+    const p = at(h);
+    if (!g || !p) return { dx: 0, dy: 0 };
+    return { dx: p.sx - g.sx, dy: p.sy - g.sy };
+  }
+
   /** How many pins are currently standing (for the development hook). */
   get pinCount(): number {
     return this.pins?.count ?? 0;
