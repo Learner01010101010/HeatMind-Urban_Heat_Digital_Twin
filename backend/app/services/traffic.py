@@ -15,7 +15,7 @@ import httpx
 import numpy as np
 
 from ..config import DATA_DIR, TOMTOM_KEY
-from . import anthropogenic, geo
+from . import anthropogenic, geo, jam_sim
 
 FLOW_URL = "https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json"
 TTL_S = 300
@@ -106,12 +106,15 @@ class TrafficService:
                         break
             return readings
 
-    def route_field(self, graph, paths, when):
+    def route_field(self, graph, paths, when, jam=None):
         n = len(graph.p_len)
         out = {"congestion": np.full(n, np.nan), "speed_ms": np.full(n, np.nan),
-               "closed": np.zeros(n, bool), "live": np.zeros(n, bool), "observed_at": None}
+               "closed": np.zeros(n, bool), "live": np.zeros(n, bool),
+               "simulated": np.zeros(n, bool), "observed_at": None}
         if not self.key or not self.is_now(when) or not paths:
-            return out
+            # A simulated jam does not need a key or a live feed; it is the one
+            # thing in here that is allowed to exist without an observation.
+            return jam_sim.apply(graph, out, jam)
         highway = np.asarray([graph.zone.data["roads"][int(graph.eroad[e])]["highway"] for e in graph.p_edge])
         motor = np.isin(highway, list(MOTOR_ROADS))
         points, seen = [], set()
@@ -152,7 +155,7 @@ class TrafficService:
                     out[k][idx] = reading[k]
                 out["live"][idx] = True
             out["observed_at"] = reading["observed_at"]
-        return out
+        return jam_sim.apply(graph, out, jam)
 
     def factor(self, when):
         if not self.is_now(when):

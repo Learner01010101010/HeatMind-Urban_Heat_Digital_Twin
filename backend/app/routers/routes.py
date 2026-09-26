@@ -53,7 +53,8 @@ async def recheck_route(req: RecheckRequest):
     try:
         return await run_in_threadpool(recheck, get_planner(), compare_id=req.compare_id, route_id=req.route_id,
                                       position=(req.position.lat, req.position.lon) if req.position else None,
-                                      objective=req.objective, off_route=req.off_route, temp_delta_c=req.temp_delta_c)
+                                      objective=req.objective, off_route=req.off_route,
+                                      temp_delta_c=req.temp_delta_c, demo_jam=req.demo_jam)
     except KeyError as exc:
         raise HTTPException(404, "Trip expired; plan the trip again.") from exc
     except ValueError as exc:

@@ -294,6 +294,23 @@ export default function TwinMap() {
       map.addLayer({ id: "route-core", type: "line", source: "routes", filter: ["get", "sel"], layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": "#ffffff", "line-width": 1.5, "line-opacity": 0.85 } });
       addFlatMapDetails(map);
       addWaterStopLayers(map);
+      map.addSource("jam", { type: "geojson", data: EMPTY });
+      map.addLayer({
+        id: "jam-area", type: "circle", source: "jam",
+        paint: {
+          // Metres, not pixels: the radius has to mean the same thing at every zoom.
+          "circle-radius": ["interpolate", ["exponential", 2], ["zoom"],
+            10, ["/", ["get", "radius_m"], 156543 / (1 << 10) * Math.cos(18.47 * Math.PI / 180)],
+            22, ["/", ["get", "radius_m"], 156543 / (1 << 22) * Math.cos(18.47 * Math.PI / 180)]],
+          "circle-color": "#fb8a1f", "circle-opacity": 0.18,
+          "circle-stroke-color": "#fb8a1f", "circle-stroke-width": 2, "circle-stroke-opacity": 0.75,
+        },
+      });
+      map.addLayer({
+        id: "jam-label", type: "symbol", source: "jam",
+        layout: { "text-field": "Simulated jam", "text-size": 11, "text-offset": [0, 1.2], "text-anchor": "top" },
+        paint: { "text-color": "#ffc48a", "text-halo-color": "#060606", "text-halo-width": 1.6 },
+      });
       if (disposed) return;
       setReady(map);
     });
@@ -309,6 +326,19 @@ export default function TwinMap() {
       host.remove();
     };
   }, [meta.data]);
+
+  // ───────── the simulated jam, so the reroute has something visible to avoid ─────────
+  const jam = useMap((s) => s.jam);
+  useEffect(() => {
+    const map = ready;
+    if (!ready || !map) return;
+    const source = map.getSource("jam") as maplibregl.GeoJSONSource | undefined;
+    if (!source) return;
+    source.setData(jam
+      ? { type: "FeatureCollection", features: [{ type: "Feature", properties: { radius_m: jam.radius_m },
+          geometry: { type: "Point", coordinates: [jam.lon, jam.lat] } }] }
+      : EMPTY);
+  }, [ready, jam]);
 
   // ───────── static zone data ─────────
   useEffect(() => {

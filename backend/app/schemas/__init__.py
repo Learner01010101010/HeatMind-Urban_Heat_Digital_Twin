@@ -37,6 +37,8 @@ class RecheckRequest(BaseModel):
     objective: RouteObjective | None = None
     off_route: bool = False
     temp_delta_c: float = Field(0.0, ge=-10, le=15)
+    """Inject a simulated jam on the road ahead, to demonstrate live rerouting."""
+    demo_jam: bool = False
 
 
 class SimulateParams(BaseModel):

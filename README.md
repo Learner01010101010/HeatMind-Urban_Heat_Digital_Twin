@@ -263,6 +263,27 @@ citywide reduction or a population-impact estimate. Water refills are proposed
 access points only, with no temperature benefit assumed. Proposals export as PDF,
 assumptions and method included. Nothing modifies routes or the twin.
 
+## Simulated traffic jam
+
+The trip playback panel can drop a jam on the road ahead, so live rerouting can be
+demonstrated without waiting for real congestion to appear near the route. The
+backend places it on the remaining path from the traveller's current position and
+injects it into the same traffic field the router already consumes, so travel
+times, the congestion routing penalty, candidate generation and the traffic factor
+all respond exactly as they would to a real reading. The affected pieces are
+marked `simulated`, never carry an observation timestamp, and the response says so.
+
+With a jam active the reroute is chosen from the candidates that avoid it, ranked
+by how many of travel time, traffic delay, heat exposure, shade, water/rest stops
+and distance they improve. The panel then reports every axis, won or lost: a
+detour is longer than the road it replaces almost by definition, so it cannot beat
+the original on all six at once, and the comparison shows which ones it did win.
+
+Vehicle flow does not slow a pedestrian. Walking has a congestion sensitivity of
+zero in the model (cycling 0.15, two-wheeler 0.45, car 0.75), so on foot a jam
+changes exposure but never arrival time, and the panel says so rather than
+implying a saving. Run the demonstration on a two-wheeler or car.
+
 ## Live micro-rest scheduling
 
 For Delivery Rider / Outdoor Worker, the main map's Micro-rest card accepts a

@@ -44,10 +44,10 @@ function updateGuidance(change: PendingRouteChange, switchRoute: boolean) {
 
 export function applyRouteChange(change: PendingRouteChange) { updateGuidance(change, true); }
 
-export async function checkLiveRoute(reason: "timer" | "off_route" | "temperature" | "manual" = "timer") {
+export async function checkLiveRoute(reason: "timer" | "off_route" | "temperature" | "jam" | "manual" = "timer") {
   const m = useMap.getState(), nav = useNav.getState(), engine = useRouteEngine.getState();
   if (engine.checking || m.loading || !m.compare || (!engine.enabled && reason !== "manual")) return;
-  if (!nav.active && reason !== "manual" && reason !== "temperature") return;
+  if (!nav.active && reason !== "manual" && reason !== "temperature" && reason !== "jam") return;
   const id = nav.active ? nav.routeId : m.selectedRouteId;
   const route = m.compare.routes.find((r) => r.id === id);
   if (!route || route.transit) return;
@@ -70,7 +70,7 @@ export async function checkLiveRoute(reason: "timer" | "off_route" | "temperatur
     const res = await fetch("/api/routes/recheck", { method: "POST", signal: requestController.signal,
       headers: { "content-type": "application/json" }, body: JSON.stringify({ compare_id: compareId,
         route_id: route.id, objective, ...(position ? { position: { lat: position.lat, lon: position.lon }, off_route: position.off_route } : {}),
-        temp_delta_c: delta }) });
+        temp_delta_c: delta, demo_jam: engine.demoJam }) });
     if (!res.ok) throw new ApiError(res.status, "Live check unavailable; keeping your current route.");
     const response = await res.json() as LiveRecheckResult;
     if (my !== sequence) return;
@@ -83,7 +83,12 @@ export async function checkLiveRoute(reason: "timer" | "off_route" | "temperatur
     }
     const change: PendingRouteChange = { response, compareId, routeId: route.id, navigating, source };
     engine.set({ lastChecked: response.checked_at, message: response.message, changes: response.changes,
+      jam: response.jam ?? null, axes: response.axes ?? null,
       pending: response.should_switch ? change : null });
+    // The map reads the jam from the map store: TwinMap is a dynamically imported
+    // chunk and did not see updates to the engine store from here.
+    useMap.getState().set({ jam: response.jam
+      ? { lat: response.jam.lat, lon: response.jam.lon, radius_m: response.jam.radius_m } : null });
     if (response.should_switch && useRouteEngine.getState().enabled && navigating) applyRouteChange(change);
     else if (navigating && !response.should_switch) updateGuidance(change, false);
     else if (!navigating && response.comparison) {

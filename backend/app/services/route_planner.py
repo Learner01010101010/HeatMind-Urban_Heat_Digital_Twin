@@ -144,7 +144,7 @@ class RoutePlanner:
     def compare(self, *, origin: tuple[float, float], destination: tuple[float, float], persona: str,
                 scenario: str, depart: datetime, temp_delta: float = 0.0, extra_paths: list[Path] | None = None,
                 compare_id: str | None = None, mode: str | None = None,
-                senior: bool = False, objective: str = "balanced") -> dict:
+                senior: bool = False, objective: str = "balanced", jam=None) -> dict:
         if persona not in PERSONAS:
             raise ValueError(f"unknown persona '{persona}'")
         if objective not in OBJECTIVES:
@@ -202,7 +202,7 @@ class RoutePlanner:
 
         paths = g.candidate_paths(src, dst, piece_seconds, penalty, mode=street_mode)
         paths = augment_candidates(g, src, dst, piece_seconds, paths, street_mode)
-        traffic = traffic_service.route_field(g, paths, depart)
+        traffic = traffic_service.route_field(g, paths, depart, jam)
         free_speed = modes_mod.speed_ms(street_mode, P, congestion=0)
         free_seconds = g.p_len / free_speed
         # Pedestrian pace is unaffected by vehicle flow; exposed road heat remains
