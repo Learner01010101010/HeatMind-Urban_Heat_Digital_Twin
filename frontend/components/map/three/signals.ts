@@ -77,7 +77,11 @@ void main() {
 
   vec4 world = instanceMatrix * vec4(local, 1.0);
   vGround = world.xy;
-  world.z += liftAt(clamp(vGround / uExtent, 0.0, 1.0)) + 0.06;
+  // Sample the terrain at the INSTANCE's own ground point, not at this vertex.
+  // Per-vertex lift warps a standing object across a slope: one side of it climbs
+  // the hill and the other sinks into it. Its footing is a single point on the
+  // ground, so a single sample is what it gets.
+  world.z += liftAt(clamp(instanceMatrix[3].xy / uExtent, 0.0, 1.0)) + 0.06;
   gl_Position = projectionMatrix * modelViewMatrix * world;
 }`;
 

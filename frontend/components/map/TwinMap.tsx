@@ -140,6 +140,8 @@ export default function TwinMap() {
   const communityMarkersRef = useRef<maplibregl.Marker[]>([]);
   const breakMarkersRef = useRef<maplibregl.Marker[]>([]);
   const meMarker = useRef<maplibregl.Marker | null>(null);
+  /** Each marker's own offset, before any terrain nudge is added to it. */
+  const baseOffsets = useRef(new WeakMap<maplibregl.Marker, [number, number]>());
   const arrowMarker = useRef<maplibregl.Marker | null>(null);
   const fittedFor = useRef<string | null>(null);
 
@@ -711,6 +713,69 @@ export default function TwinMap() {
       );
     }
   }, [ready, compare, selected, mode, layerEpoch]);
+
+  // ───────── HTML markers: sit them on the terrain, not under it ─────────
+  //
+  // Everything drawn inside the twin's own scene rides the elevation through the
+  // shared lift in its vertex shader. A MapLibre Marker cannot: it is a DOM element
+  // placed from a lng/lat on the basemap plane, and once the ground stood on real
+  // elevation every water dot, POI and endpoint pin was left buried in the hillside
+  // it is meant to be standing on.
+  //
+  // So they are nudged up the screen by however many pixels their own ground height
+  // works out to. A vertical offset in a pitched perspective view projects to screen
+  // Y scaled by cos(pitch) — exact enough at these heights, and it costs one
+  // multiply per marker rather than a projection matrix.
+  //
+  // Runs on move, zoom and pitch because all three change the conversion, and each
+  // marker's own anchoring offset is preserved rather than overwritten.
+  useEffect(() => {
+    const map = ready;
+    if (!ready || !map) return;
+
+    const apply = () => {
+      const layer = layerRef.current;
+      const twin = mode === "twin";
+      const pitch = (map.getPitch() * Math.PI) / 180;
+      const zoom = map.getZoom();
+      const lists: maplibregl.Marker[][] = [
+        meMarker.current ? [meMarker.current] : [],
+        odMarkers.current,
+        [...chipMarkers.current.values()],
+        spotMarkers.current,
+        interventionMarkersRef.current,
+        communityMarkersRef.current,
+        breakMarkersRef.current,
+      ];
+      for (const list of lists) {
+        for (const m of list) {
+          let base = baseOffsets.current.get(m);
+          if (!base) {
+            const o = m.getOffset();
+            base = [o.x, o.y];
+            baseOffsets.current.set(m, base);
+          }
+          const h = twin && layer ? layer.elevationAt(m.getLngLat().lat, m.getLngLat().lng) : 0;
+          if (h <= 0) {
+            m.setOffset(base);
+            continue;
+          }
+          const mpp = (156543.03392 * Math.cos((m.getLngLat().lat * Math.PI) / 180)) / Math.pow(2, zoom);
+          m.setOffset([base[0], base[1] - (h / mpp) * Math.cos(pitch)]);
+        }
+      }
+    };
+
+    apply();
+    map.on("move", apply);
+    map.on("zoom", apply);
+    map.on("pitch", apply);
+    return () => {
+      map.off("move", apply);
+      map.off("zoom", apply);
+      map.off("pitch", apply);
+    };
+  }, [ready, mode, compare, selected, pois.data, layerEpoch]);
 
   // ───────── the traveller's arrow on the selected route ─────────
   //

@@ -29,6 +29,15 @@ export interface NavState {
   startedAt: number;
   /** Set when the user has been carried off the planned line. */
   offRouteM: number;
+  /**
+   * Playback rate for the simulated walk, when no real fix is driving progress.
+   *
+   * Real time is right for someone actually walking and useless for showing the
+   * thing to a room: a 50-minute route takes 50 minutes to watch. This multiplies
+   * only the simulated advance, never a real position, so the demo runs at 8x
+   * while a real trip still moves at the speed the body is moving.
+   */
+  simSpeed: number;
   set: (p: Partial<Omit<NavState, "set">>) => void;
 }
 
@@ -39,6 +48,7 @@ export const useNav = create<NavState>()((set) => ({
   live: false,
   startedAt: 0,
   offRouteM: 0,
+  simSpeed: 1,
   set: (p) => set(p),
 }));
 
@@ -181,6 +191,11 @@ export function startNavigation(route: Route) {
 
 export function stopNavigation() {
   useNav.getState().set({ active: false, routeId: null, progressM: 0, live: false, offRouteM: 0 });
+  // Hand the position back. The simulation borrowed the geolocation store to move
+  // the dot; leaving a fabricated fix behind it would have the rest of the app
+  // believing the user is standing wherever the demo happened to stop.
+  const g = useGeo.getState();
+  if (g.status === "simulated") g.set({ status: "idle", lat: null, lon: null, headingDeg: null });
 }
 
 /**
@@ -195,7 +210,10 @@ export function advance(route: Route, geometry: [number, number][], cum: number[
   const geo = useGeo.getState();
   const total = cum[cum.length - 1] ?? 0;
 
-  if (geo.lat != null && geo.lon != null) {
+  // A fix this function wrote itself is not evidence of anything. Without this the
+  // simulation would feed its own position back in, project it onto the line it came
+  // from, and the HUD would report a live GPS lock that does not exist.
+  if (geo.lat != null && geo.lon != null && geo.status !== "simulated") {
     const { alongM, offM } = projectOnto(geometry, cum, [geo.lat, geo.lon]);
     if (offM <= ON_ROUTE_M) {
       nav.set({ live: true, offRouteM: offM, progressM: alongM });
@@ -206,8 +224,23 @@ export function advance(route: Route, geometry: [number, number][], cum: number[
     else if (nav.offRouteM !== offM) nav.set({ offRouteM: offM });
   }
 
+  // The mode's own speed, as the router costed it: 4.9 km/h on foot, 27 on a
+  // two-wheeler, 24.8 in a car through modelled congestion.
   const speedMs = ((route.speed_kmh ?? 5) * 1000) / 3600;
-  const next = Math.min(total, nav.progressM + speedMs * dtSeconds);
+  const next = Math.min(total, nav.progressM + speedMs * (nav.simSpeed || 1) * dtSeconds);
   nav.set({ progressM: next, live: false });
+
+  // Move the position with it. The blue dot, the chase camera and the corridor
+  // reveal all read the geolocation store, so writing the simulated point here is
+  // what makes the whole app behave as though the trip is really under way —
+  // rather than a progress bar advancing next to a stationary dot.
+  const here = alongRoute(geometry, cum, next);
+  useGeo.getState().set({
+    status: "simulated",
+    lat: here.position[0],
+    lon: here.position[1],
+    headingDeg: here.bearing,
+    accuracyM: 8,
+  });
   return next;
 }

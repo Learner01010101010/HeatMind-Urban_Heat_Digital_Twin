@@ -73,6 +73,7 @@ attribute float aSeed;
 attribute float aType;
 attribute float aHeight;
 attribute float aRoof;      // 1 on roof caps
+attribute vec2 aAnchor;     // the footprint's own ground point, shared by every vertex of it
 
 varying vec2 vFacade;
 varying float vSeed;
@@ -97,10 +98,16 @@ void main() {
   vec3 p = position;
   p.z *= uGrow;
   vGround = p.xy;
-  // Ride the vulnerability terrain. Sampled at the footprint rather than per
-  // vertex so a building rises as one rigid block instead of shearing across a
-  // slope, which is what a building standing on sloping ground actually does.
-  p.z += liftAt(clamp(vGround / uExtent, 0.0, 1.0));
+  // Ride the terrain from ONE point per building, not from each vertex.
+  //
+  // This said it sampled at the footprint and then sampled p.xy, which is the
+  // vertex. On flat ground the two agree and nothing showed. On a real hillside
+  // every corner of a footprint lifted by a different amount, so the base stopped
+  // being planar: the uphill corners drove into the slope and the downhill ones
+  // hung off it, and the walls sheared with them. A building on a slope has a level
+  // base — the ground is cut or filled to give it one — which is what aAnchor
+  // restores here.
+  p.z += liftAt(clamp(aAnchor / uExtent, 0.0, 1.0));
   gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
 }`;
 
@@ -341,6 +348,7 @@ export class Buildings {
     const type = new Float32Array(vertexCount);
     const hgt = new Float32Array(vertexCount);
     const roof = new Float32Array(vertexCount);
+    const anchor = new Float32Array(vertexCount * 2);
     let v = 0;
 
     const push = (
@@ -348,16 +356,28 @@ export class Buildings {
       nx: number, ny: number, nz: number,
       fu: number, fv: number,
       sd: number, ty: number, hh: number, isRoof: number,
+      ax: number, ay: number,
     ) => {
       pos[v * 3] = x; pos[v * 3 + 1] = y; pos[v * 3 + 2] = z;
       nrm[v * 3] = nx; nrm[v * 3 + 1] = ny; nrm[v * 3 + 2] = nz;
       facade[v * 2] = fu; facade[v * 2 + 1] = fv;
       seed[v] = sd; type[v] = ty; hgt[v] = hh; roof[v] = isRoof;
+      anchor[v * 2] = ax; anchor[v * 2 + 1] = ay;
       v++;
     };
 
     for (const b of rings) {
       const { ring, h, t, s: sd } = b;
+      // One ground point for the whole footprint: the mean of its vertices. Which
+      // point matters less than that every vertex of this building uses the same one.
+      let axs = 0;
+      let ays = 0;
+      for (const pt of ring) {
+        axs += pt.x;
+        ays += pt.y;
+      }
+      const ax = axs / Math.max(1, ring.length);
+      const ay = ays / Math.max(1, ring.length);
 
       // ---- walls: one quad per footprint edge, UVs in metres ----
       let run = 0;
@@ -373,19 +393,19 @@ export class Buildings {
         const u0 = run;
         const u1 = run + len;
         run = u1;
-        push(a.x, a.y, 0, nx, ny, 0, u0, 0, sd, t, h, 0);
-        push(c.x, c.y, 0, nx, ny, 0, u1, 0, sd, t, h, 0);
-        push(c.x, c.y, h, nx, ny, 0, u1, h, sd, t, h, 0);
-        push(a.x, a.y, 0, nx, ny, 0, u0, 0, sd, t, h, 0);
-        push(c.x, c.y, h, nx, ny, 0, u1, h, sd, t, h, 0);
-        push(a.x, a.y, h, nx, ny, 0, u0, h, sd, t, h, 0);
+        push(a.x, a.y, 0, nx, ny, 0, u0, 0, sd, t, h, 0, ax, ay);
+        push(c.x, c.y, 0, nx, ny, 0, u1, 0, sd, t, h, 0, ax, ay);
+        push(c.x, c.y, h, nx, ny, 0, u1, h, sd, t, h, 0, ax, ay);
+        push(a.x, a.y, 0, nx, ny, 0, u0, 0, sd, t, h, 0, ax, ay);
+        push(c.x, c.y, h, nx, ny, 0, u1, h, sd, t, h, 0, ax, ay);
+        push(a.x, a.y, h, nx, ny, 0, u0, h, sd, t, h, 0, ax, ay);
       }
 
       // ---- roof cap ----
       for (const tri of b.tris) {
         for (const idx of tri) {
           const pt = ring[idx];
-          push(pt.x, pt.y, h, 0, 0, 1, pt.x, h, sd, t, h, 1);
+          push(pt.x, pt.y, h, 0, 0, 1, pt.x, h, sd, t, h, 1, ax, ay);
         }
       }
     }
@@ -400,6 +420,7 @@ export class Buildings {
     geo.setAttribute("aType", new THREE.BufferAttribute(type.subarray(0, used), 1));
     geo.setAttribute("aHeight", new THREE.BufferAttribute(hgt.subarray(0, used), 1));
     geo.setAttribute("aRoof", new THREE.BufferAttribute(roof.subarray(0, used), 1));
+    geo.setAttribute("aAnchor", new THREE.BufferAttribute(anchor.subarray(0, used * 2), 2));
     geo.computeBoundingSphere();
 
     this.material = new THREE.ShaderMaterial({
