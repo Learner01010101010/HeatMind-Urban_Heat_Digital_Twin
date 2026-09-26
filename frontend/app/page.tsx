@@ -8,6 +8,7 @@ import BreakSheet from "@/components/hud/BreakSheet";
 import EquityToggle from "@/components/hud/EquityToggle";
 import { InsightChip, InsightPanel } from "@/components/hud/InsightChip";
 import InterventionPanel from "@/components/hud/InterventionPanel";
+import MicroRestCard from "@/components/hud/MicroRestCard";
 import MyLocation from "@/components/hud/MyLocation";
 import ModeToggle from "@/components/hud/ModeToggle";
 import ModeSelector from "@/components/hud/ModeSelector";
@@ -177,6 +178,7 @@ export default function Home() {
             {/* The sun readout sits with the timeline: scrubbing moves both the sun in
                 the 3D sky and this number, which is what ties the two together. */}
             <SunChip />
+            <MicroRestCard />
             <InsightChip />
           </div>
           <div className="pointer-events-auto flex-1 min-w-0 max-w-[600px] mx-auto">
@@ -190,6 +192,11 @@ export default function Home() {
         </div>
       ) : (
         <div className="absolute inset-x-0 bottom-[calc(56px+env(safe-area-inset-bottom))] z-30 p-2 flex flex-col gap-2 pointer-events-none">
+          {/* Same card as the desktop bar; the two layouts are separate trees, so a
+              worker on a phone would otherwise never see it. */}
+          <div className="pointer-events-auto self-center">
+            <MicroRestCard />
+          </div>
           <div className="pointer-events-auto self-center max-w-full overflow-x-auto no-scrollbar">
             <ModeSelector compact />
           </div>

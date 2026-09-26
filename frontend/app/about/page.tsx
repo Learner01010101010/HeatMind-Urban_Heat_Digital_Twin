@@ -3,6 +3,7 @@
 import { Brain, ChevronLeft, Clock3, ExternalLink, Fingerprint, Moon, Route as RouteIcon, Stamp, Thermometer } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import NioshWbgtPanel from "@/components/hud/NioshWbgtPanel";
 import Logo from "@/components/shell/Logo";
 import { api, type OpenDataCatalog } from "@/lib/api";
 import { useMeta } from "@/lib/hooks";
@@ -236,6 +237,8 @@ export default function About() {
           )}
           {catalog && <p className="text-[11.5px] text-ink-500 mt-3">{catalog.license}</p>}
         </section>
+
+        <NioshWbgtPanel />
 
         <section>
           <h2 className="text-xl font-extrabold text-ink-100 mb-1">Built for the UN Sustainable Development Goals</h2>
