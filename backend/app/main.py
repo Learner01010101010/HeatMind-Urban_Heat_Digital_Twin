@@ -81,7 +81,7 @@ def meta():
             {"layer": "Sun position", "source": "NOAA solar ephemeris", "status": "real"},
             {"layer": "Ambient weather", "source": "Open-Meteo at the live current time (Pune climatology fallback offline)", "status": "mixed"},
             {"layer": "Surface heat", "source": "Physics-informed synthetic model (surface material × sun × shade)", "status": "modelled"},
-            {"layer": "Traffic heat", "source": "OSM road class weighted by a modelled Pune weekday/weekend congestion profile — no live traffic feed is available for this zone", "status": "modelled"},
+            {"layer": "Traffic heat", "source": "Modelled road heat; optional fresh TomTom speed samples inform route timing. Unobserved roads and forecasts remain modelled.", "status": "modelled"},
             {"layer": "Industrial heat", "source": "Waste heat from footprints inferred as industrial; the OSM extract carries no industrial tags, so no premises here is confirmed industrial", "status": "modelled"},
             {"layer": "Sky view factor", "source": "Horizon scan of OSM building heights (32 azimuths, 200 m) — Oke canyon geometry", "status": "modelled"},
             {"layer": "Building typology", "source": "OSM building tag where present (37 of 998); geometry + land-use inference otherwise", "status": "mixed"},

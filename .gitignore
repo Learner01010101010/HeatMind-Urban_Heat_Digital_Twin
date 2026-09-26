@@ -30,6 +30,8 @@ backend/data/svf.meta.json
 # Derived from osm_raw.json by services.osm_ingest.build_zone() on first boot, and
 # large enough for the Pune-wide extract that it does not belong in git.
 backend/data/zone.json
+backend/data/traffic_usage.json
+backend/data/traffic_usage.tmp
 # Per-tile Overpass cache, fetched on demand for whichever corridor is requested.
 backend/data/osm_tiles/
 

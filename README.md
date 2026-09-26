@@ -198,6 +198,43 @@ POST /api/passport/log                 { user_id, route_id, rest_stops_taken }
 
 To rebuild the zone from a fresh OSM extract: replace `backend/data/osm_raw.json`, delete `backend/data/zone.json`, then run `python scripts/ingest_osm.py` from `backend/`.
 
+## Traffic, route checks and place photos
+
+Copy `backend/.env.example` to `backend/.env`, then set `HEATMIND_TOMTOM_KEY`
+and optionally `HEATMIND_MAPILLARY_TOKEN`. Restart the backend after editing.
+Never commit `.env` or put these server credentials in frontend variables.
+
+Route allocation reuses the existing street search, with localized TomTom speed
+samples for vehicle travel times and the existing twin's temperature, shade and
+industrial waste heat. The transparent preference index weighs heat 55%, traffic
+15%, shade 15%, industrial heat 10%, and mapped rest/water access 5%. It remains
+separate from the persona heat-risk score. Candidates stay within the existing
+detour limit; a detour needs at least a two-point index improvement.
+
+Traffic is sampled on demand at up to four points across candidate corridors,
+cached for five minutes, and capped at 18,000 attempted requests per UTC month by
+default (`HEATMIND_TRAFFIC_MONTHLY_LIMIT`, maximum 18,000). Run one backend worker
+so the local counter stays authoritative. Other apps using the same provider key
+can consume its allowance too. Missing keys, stale/low-confidence data, quota
+errors, and future departures use the existing congestion model. Live coverage
+is shown per route; road matching is approximate and not direction-specific.
+Walking keeps its pedestrian pace but prefers less-congested sampled corridors;
+vehicle timing also changes with observed speed. The classifier's traffic factor
+uses observed congestion on sampled roads and an estimated road-heat proxy on
+other roads, with an additional delay contribution for vehicles.
+Industrial heat is estimated from mapped/inferred premises, already part of
+feels-like; no industrial radiation or air-pollutant sensors are connected.
+
+Benches, toilets, water dispensers and rest facilities open an anchored popup with
+OSM access, hours, fees and accessibility tags where recorded. Linked Wikimedia
+Commons/Wikidata photos include credits; Mapillary fallback is labelled nearby
+street imagery with distance and capture date. Missing coverage never substitutes
+a stock photo. Estimated points and shops are not public refill guarantees.
+Gemini trip tips are opt-in, use one bounded request, and never change the route.
+
+Validation: `python -m unittest discover -s tests -v` from `backend/`; `npm run build`
+and targeted ESLint from `frontend/`.
+
 ## Stack
 
 Next.js 16 (App Router) · Tailwind CSS v4 · MapLibre GL 6 · Zustand · lucide-react · Geist — FastAPI · NumPy · httpx · SQLite.

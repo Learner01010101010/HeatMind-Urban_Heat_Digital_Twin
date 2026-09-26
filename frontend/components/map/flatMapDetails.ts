@@ -3,7 +3,7 @@ import type { Poi, ZoneData } from "@/lib/api";
 
 const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
 export const WATER_LAYERS = ["water-stop-pins", "water-stop-dots"];
-const FLAT_LAYERS = ["landcover-2d", "street-edge-2d", "street-fill-2d", "footpaths-2d", "street-names-2d", "place-names-2d", ...WATER_LAYERS];
+const FLAT_LAYERS = ["landcover-2d", "street-edge-2d", "street-fill-2d", "footpaths-2d", "street-names-2d", "place-names-2d"];
 
 /** Crisp vector detail from the very same mapped zone used by the twin. */
 export function addFlatMapDetails(map: Map) {
@@ -45,12 +45,20 @@ export function addWaterStopLayers(map: Map) {
   ctx.bezierCurveTo(9, 23, 19, 23, 19, 16); ctx.bezierCurveTo(19, 13, 15, 9, 14, 6);
   ctx.fillStyle = "#e7f9ff"; ctx.fill();
   map.addImage("water-drop-pin", ctx.getImageData(0, 0, 56, 72), { pixelRatio: 2 });
+  for (const [id, color, glyph] of [["rest-pin", "#ad7a30", "▰"], ["toilet-pin", "#7662b8", "WC"], ["shelter-pin", "#398265", "S"], ["indoor-pin", "#805175", "+"]]) {
+    ctx.clearRect(0, 0, 28, 36);
+    ctx.beginPath(); ctx.moveTo(14, 35); ctx.bezierCurveTo(11, 31, 2, 23, 2, 14); ctx.arc(14, 14, 12, Math.PI, 0); ctx.bezierCurveTo(26, 23, 17, 31, 14, 35);
+    ctx.fillStyle = color; ctx.fill(); ctx.strokeStyle = "#ecf2f5"; ctx.stroke();
+    ctx.fillStyle = "#fff"; ctx.font = glyph === "WC" ? "bold 9px sans-serif" : "bold 16px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(glyph, 14, 15);
+    if (id === "rest-pin") { ctx.fillRect(7, 18, 2, 5); ctx.fillRect(19, 18, 2, 5); ctx.fillRect(6, 8, 16, 2); }
+    map.addImage(id, ctx.getImageData(0, 0, 56, 72), { pixelRatio: 2 });
+  }
   map.addSource("water-stops", { type: "geojson", data: EMPTY });
   map.addLayer({ id: "water-stop-dots", type: "circle", source: "water-stops", minzoom: 13.5, maxzoom: 16, paint: {
-    "circle-color": "#77d9f5", "circle-radius": ["case", ["get", "on"], 5, 3], "circle-stroke-color": "#0f3345", "circle-stroke-width": 1.5,
+    "circle-color": ["case", ["==", ["get", "detail"], "toilets"], "#c4b5fd", ["==", ["get", "type"], "water"], "#77d9f5", "#ffd08a"], "circle-radius": ["case", ["get", "on"], 5, 3], "circle-stroke-color": "#0f3345", "circle-stroke-width": 1.5,
   } });
   map.addLayer({ id: "water-stop-pins", type: "symbol", source: "water-stops", minzoom: 16, layout: {
-    "icon-image": "water-drop-pin", "icon-anchor": "bottom", "icon-size": ["case", ["get", "on"], 1.1, 0.8],
+    "icon-image": ["case", ["==", ["get", "detail"], "toilets"], "toilet-pin", ["==", ["get", "type"], "water"], "water-drop-pin", ["==", ["get", "type"], "rest"], "rest-pin", ["==", ["get", "type"], "shade"], "shelter-pin", "indoor-pin"], "icon-anchor": "bottom", "icon-size": ["case", ["get", "on"], 1.1, 0.8],
     "symbol-sort-key": ["case", ["get", "on"], 0, ["==", ["get", "source"], "osm"], 1, 2],
     "icon-padding": 7, "text-field": ["step", ["zoom"], ["case", ["any", ["get", "on"], ["==", ["get", "source"], "osm"]], ["get", "name"], ""], 17.3, ["get", "name"]],
     "text-font": ["Arial"], "text-size": 10, "text-anchor": "top", "text-offset": [0, 0.35], "text-max-width": 11, "text-optional": true,
@@ -64,7 +72,7 @@ export function setFlatZoneData(map: Map, zone: ZoneData) {
 }
 
 export function setWaterStopData(map: Map, pois: GeoJSON.FeatureCollection<GeoJSON.Point, Poi>, along: Set<string>) {
-  (map.getSource("water-stops") as GeoJSONSource).setData({ type: "FeatureCollection", features: pois.features.filter((f) => f.properties.type === "water").map((f) => ({ ...f, properties: { ...f.properties, on: along.has(f.properties.id) } })) });
+  (map.getSource("water-stops") as GeoJSONSource).setData({ type: "FeatureCollection", features: pois.features.filter((f) => f.properties.source === "osm" || along.has(f.properties.id)).map((f) => ({ ...f, properties: { ...f.properties, on: along.has(f.properties.id) } })) });
 }
 
 export function setFlatDetailsVisible(map: Map, visible: boolean) {
@@ -73,6 +81,6 @@ export function setFlatDetailsVisible(map: Map, visible: boolean) {
 
 export function waterStopDescription(p: Pick<Poi, "source" | "detail">) {
   if (p.source === "seeded") return "Estimated water stop · availability unverified";
-  if (["drinking_water", "water_point", "fountain"].includes(p.detail ?? "")) return "Mapped public water point";
+  if (["drinking_water", "water_point", "water_dispenser"].includes(p.detail ?? "")) return "Mapped water point · confirm access";
   return "Shop / café water access · purchase may be needed";
 }

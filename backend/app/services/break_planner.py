@@ -75,7 +75,7 @@ REAL_SOURCE = "osm"
 # What kind of water it actually is, from the OSM amenity behind the point. This
 # corridor has exactly three mapped public taps, so most of the time the honest
 # answer is "a shop that will sell you a bottle", and the advice says so.
-TAP_DETAILS = frozenset({"drinking_water", "water_point", "fountain"})
+TAP_DETAILS = frozenset({"drinking_water", "water_point", "water_dispenser"})
 INDOOR_DETAILS = frozenset({"hospital", "clinic", "doctors", "pharmacy", "library",
                             "community_centre", "townhall", "place_of_worship"})
 
@@ -129,9 +129,11 @@ def plan(*, persona: str, minutes: np.ndarray, cum_m: np.ndarray, feels: np.ndar
 
     water_pois = [p for p in along if p.get("type") in WATER_TYPES
                   and p.get("source") == REAL_SOURCE
+                  and p.get("access") not in ("private", "no") and p.get("drinking_water") != "no"
                   and p.get("off_route_m", 0) <= MAX_DETOUR_M]
     rest_pois = [p for p in along if p.get("type") in REST_TYPES
                  and p.get("source") == REAL_SOURCE
+                 and p.get("access") not in ("private", "no")
                  and p.get("off_route_m", 0) <= MAX_DETOUR_M]
     taps = [p for p in water_pois if water_kind(p) == "tap"]
 
@@ -258,7 +260,7 @@ def _stop(kind: str, at_m: float, acc_ml: float, pois: list[dict], P: dict,
         "eta": (depart + timedelta(minutes=max(0.0, eta_min))).isoformat(),
         "lat": poi["lat"] if poi else None,
         "lon": poi["lon"] if poi else None,
-        "poi": ({"id": poi.get("id"), "name": poi.get("name"), "type": poi.get("type"),
+        "poi": ({**poi, "id": poi.get("id"), "name": poi.get("name"), "type": poi.get("type"),
                  "detail": poi.get("detail"), "water_kind": water_kind(poi),
                  "source": poi.get("source"), "off_route_m": poi.get("off_route_m")}
                 if poi else None),

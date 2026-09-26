@@ -249,7 +249,7 @@ def build_zone() -> dict[str, Any]:
             if t.get("name"):
                 add_place(t["name"], t.get("amenity") or kind, cla, clo)
             if t.get("amenity"):
-                _amenity_poi(pois, t, cla, clo)
+                _amenity_poi(pois, t, cla, clo, f"{e['type']}/{e['id']}")
             continue
 
         kind = None
@@ -293,7 +293,7 @@ def build_zone() -> dict[str, Any]:
                             "crossing": t.get("crossing", ""),
                             "name": t.get("name", "")})
         if t.get("amenity") or t.get("shop"):
-            _amenity_poi(pois, t, lat, lon)
+            _amenity_poi(pois, t, lat, lon, f"{e['type']}/{e['id']}")
             if t.get("name") and t.get("amenity"):
                 add_place(t["name"], t["amenity"], lat, lon)
         # Neighbourhood names. Without these the search box knows shops and colleges
@@ -334,6 +334,7 @@ def build_zone() -> dict[str, Any]:
 
     zone = {
         "meta": {
+            "amenities_version": 3,
             "name": ZONE_NAME, "city": ZONE_CITY, "bbox": list(BBOX), "center": list(CENTER),
             "generated_at": datetime.utcnow().isoformat() + "Z",
             "osm_timestamp": raw.get("osm3s", {}).get("timestamp_osm_base"),
@@ -406,21 +407,23 @@ def _junctions(roads: list[dict]) -> list[dict]:
 _FEATURED_PLACE_KINDS = frozenset({"city", "town", "suburb", "neighbourhood", "village"})
 
 
-def _amenity_poi(pois: list, t: dict, lat: float, lon: float) -> None:
+def _amenity_poi(pois: list, t: dict, lat: float, lon: float, osm_ref: str = "") -> None:
     a = t.get("amenity", "")
     name = t.get("name") or a.replace("_", " ").title() or t.get("shop", "Shop").title()
-    if a in ("drinking_water", "water_point"):
+    if a in ("drinking_water", "water_point", "water_dispenser"):
         typ = "water"
-    elif a in ("restaurant", "cafe", "fast_food", "food_court", "ice_cream") or t.get("shop"):
-        typ = "water"  # refreshments / drinking water available
+    elif a in ("restaurant", "cafe", "fast_food", "food_court", "ice_cream") or t.get("shop") in ("convenience", "supermarket", "dairy", "grocery", "grocer", "bakery", "beverages", "water", "general"):
+        typ = "water"  # Potential purchase stop; never treated as a public tap.
     elif a in ("hospital", "clinic", "doctors", "pharmacy", "library", "community_centre"):
         typ = "cooling_center"
-    elif a in ("place_of_worship", "bench", "shelter"):
+    elif a in ("place_of_worship", "bench", "shelter", "toilets"):
         typ = "rest"
     else:
         return
+    fields = {k: t[k] for k in ("opening_hours", "operator", "access", "fee", "wheelchair", "drinking_water",
+                                "capacity", "covered", "wikimedia_commons", "wikidata", "mapillary") if t.get(k)}
     pois.append({"type": typ, "name": name, "lat": round(lat, 7), "lon": round(lon, 7), "source": "osm",
-                 "detail": a or t.get("shop", "")})
+                 "detail": a or t.get("shop", ""), "osm_ref": osm_ref, **fields})
 
 
 def _seed_pois(pois, roads, surfaces, places, rng) -> None:

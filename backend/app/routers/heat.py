@@ -44,7 +44,15 @@ def heat_point(lat: float, lon: float, scenario: str = "live", time: str | None 
     """Inspect the twin at one location: feels-like, surface temperature, shade, material."""
     tw = get_twin()
     f = tw.frame(resolve_time(scenario, time, offset_min), scenario, temp_delta)
-    return tw.sample(f, lat, lon)
+    out = tw.sample(f, lat, lon)
+    from ..services import geo
+    from ..services.anthropogenic import industrial_field
+    r, c = geo.xy_to_cell(*geo.to_xy(lat, lon))
+    industrial = float(industrial_field(tw.zone, f.when)[r, c])
+    out["industrial_heat_c"] = round(industrial, 2)
+    out["traffic_heat_c"] = round(max(0, float(f.anthro[r, c]) - industrial), 2)
+    out["heat_source_note"] = "Estimated waste heat; no live industrial radiation or pollutant measurements."
+    return out
 
 
 @router.get("/interventions")

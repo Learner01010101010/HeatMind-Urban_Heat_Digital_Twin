@@ -2,7 +2,7 @@
 
 import * as maplibregl from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
-import { api, type BuildingProps, type EquityIndex, type InterventionKind, type InterventionResult, type PackedBuildings } from "@/lib/api";
+import { api, type BuildingProps, type EquityIndex, type InterventionKind, type InterventionResult, type PackedBuildings, type Poi } from "@/lib/api";
 import { runIntervention, setEndpoint } from "@/lib/actions";
 import { useBaseTime, useBusStops, useFrames, useMeta, useNearestFrame, usePois, useZone } from "@/lib/hooks";
 import { useGeo } from "@/lib/geolocation";
@@ -18,7 +18,8 @@ import { HeatTwinOverlayLayer, OVERLAY_LAYER_ID } from "./three/overlayLayer";
 import { loadFields } from "./three/fields";
 import type { SignalRecord } from "./three/signals";
 import type { TreeRecord } from "./three/trees";
-import { addFlatMapDetails, addWaterStopLayers, setFlatDetailsVisible, setFlatZoneData, setWaterStopData, waterStopDescription, WATER_LAYERS } from "./flatMapDetails";
+import { addFlatMapDetails, addWaterStopLayers, setFlatDetailsVisible, setFlatZoneData, setWaterStopData, WATER_LAYERS } from "./flatMapDetails";
+import { showFacilityPopup, showBreakPopup } from "./facilityPopup";
 
 // How much of the twin is built around the user's own starting point. Generous
 // enough that the first view is a real neighbourhood rather than a keyhole, and
@@ -245,7 +246,7 @@ export default function TwinMap() {
       map.addLayer({ id: "buildings-2d", type: "fill", source: "buildings", minzoom: 15, paint: { "fill-color": ["interpolate", ["linear"], ["get", "height_m"], 0, "#303d46", 15, "#43525c", 40, "#5c686c"], "fill-opacity": 0.9, "fill-outline-color": "#718087" } });
       map.addSource("pois", { type: "geojson", data: EMPTY });
       map.addLayer({
-        id: "pois", type: "circle", source: "pois", minzoom: 14.5,
+        id: "pois", type: "circle", source: "pois", minzoom: 14.5, layout: { visibility: "none" },
         paint: {
           "circle-color": ["get", "color"],
           "circle-radius": ["interpolate", ["linear"], ["zoom"], 15, ["case", ["get", "on"], 4.5, 1.8], 18, ["case", ["get", "on"], 8, 4]],
@@ -443,10 +444,8 @@ export default function TwinMap() {
     const route = compare.routes.find((r) => r.id === selected) ?? compare.routes[0];
     if (!route?.geometry?.length) return;
     layer.revealRoute(route.geometry);
-    // Stand the thermal profile on the selected route. Only the selected one: three
-    // overlapping rows of pins would be unreadable, and the comparison between
-    // alternatives is what the route chips are for.
-    layer.setRoutePins(route.geometry);
+    // Inspect temperature by clicking the map; reserve pins for useful places.
+    layer.setRoutePins([]);
     // The route as geometry in the twin. MapLibre's own line layers sit on the
     // basemap plane, which stopped being the ground the moment the twin started
     // standing on real elevation.
@@ -603,21 +602,10 @@ export default function TwinMap() {
     return () => cancelAnimationFrame(raf);
   }, [ready, navActive, navRouteId, compare, reduceMotion, mode]);
 
-  // hottest / coolest beacons in twin mode
+  // Temperature is available through map inspection; keep place pins uncluttered.
   useEffect(() => {
-    const map = ready;
     spotMarkers.current.forEach((m) => m.remove());
     spotMarkers.current = [];
-    if (!ready || !map || mode !== "twin" || !nearest) return;
-    const mk = (spot: typeof nearest.stats.hottest, color: string, title: string) => {
-      const d = document.createElement("div");
-      d.className = "hm-hotspot";
-      d.style.setProperty("--c", color);
-      d.title = `${title}: ${fmtTemp(spot.feels_c, units)} · ${spot.label}`;
-      spotMarkers.current.push(new maplibregl.Marker({ element: d }).setLngLat([spot.lon, spot.lat]).addTo(map));
-    };
-    mk(nearest.stats.hottest, "#ef4444", "Hottest street");
-    mk(nearest.stats.coolest, "#9dc06a", "Coolest street");
   }, [ready, mode, nearest, units]);
 
   // ───────── intervention simulator pins (SDG 13/15) ─────────
@@ -726,7 +714,7 @@ export default function TwinMap() {
       d.addEventListener("click", (ev) => {
         ev.stopPropagation();
         ev.preventDefault();
-        useMap.getState().set({ selectedBreak: st });
+        showBreakPopup(map, st);
       });
       breakMarkersRef.current.push(
         new maplibregl.Marker({ element: d, anchor: "center" }).setLngLat([st.lon, st.lat]).addTo(map),
@@ -837,7 +825,7 @@ export default function TwinMap() {
     (map.getSource("pois") as maplibregl.GeoJSONSource).setData({
       type: "FeatureCollection",
       features: pois.data.features
-        .filter((f) => !route || along.has(f.properties.id))
+        .filter((f) => f.properties.source === "osm" || along.has(f.properties.id))
         .map((f) => ({ ...f, properties: { ...f.properties, color: POI_STYLE[f.properties.type].color, on: along.has(f.properties.id) } })),
     });
   }, [ready, pois.data, compare, selected]);
@@ -1010,10 +998,8 @@ export default function TwinMap() {
       }
       const water = map.queryRenderedFeatures(ev.point, { layers: WATER_LAYERS })[0];
       if (water?.geometry.type === "Point") {
-        const props = water.properties;
-        new maplibregl.Popup({ maxWidth: "280px", offset: 25 }).setLngLat(water.geometry.coordinates as [number, number]).setHTML(
-          `<div style="min-width:200px"><div style="font-size:10px;color:#77d9f5;text-transform:uppercase;letter-spacing:.08em">Water stop</div><strong style="display:block;margin:5px 0">${esc(props.name)}</strong><p style="font-size:12px;color:#b7c6cd">${esc(waterStopDescription(props as { source: "osm" | "seeded"; detail?: string }))}</p><p style="font-size:10px;color:#858179;margin-top:8px">${props.on ? "Along the selected route · " : ""}${props.source === "osm" ? "OpenStreetMap" : "Seeded estimate"} · confirm access on arrival</p></div>`
-        ).addTo(map);
+        const [lon, lat] = water.geometry.coordinates;
+        showFacilityPopup(map, { ...water.properties, lat, lon } as Poi);
         return;
       }
       const hit = map.queryRenderedFeatures(ev.point, { layers: ["route-halo"] })[0];
@@ -1042,7 +1028,9 @@ export default function TwinMap() {
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;margin-top:10px;font-size:12.5px;color:#f3f3f2">
               ${row("Air", fmtTemp(s.air_c, u))}${row("Ground", fmtTemp(s.surface_c, u))}
               ${row("Sun", sun)}${row("Surface", esc(s.surface))}
+              ${row("Traffic heat · estimate", `+${s.traffic_heat_c.toFixed(2)}°C`)}${row("Industry · estimate", `+${(s.industrial_heat_c ?? 0).toFixed(2)}°C`)}
             </div>
+            <p style="font-size:10px;color:#858179;margin-top:8px">Estimated waste heat · no live radiation or pollution measurements</p>
           </div>`);
       } catch {
         popup.setHTML('<div style="font-size:12px">Could not sample the twin here.</div>');
@@ -1068,9 +1056,10 @@ export default function TwinMap() {
   return (
     <div className="absolute inset-0 bg-ink-950">
       <div ref={el} className="absolute inset-0" role="application" aria-label="Heat digital twin map" />
-      {ready && mode !== "twin" && <div className="pointer-events-none absolute right-4 bottom-[145px] md:bottom-[130px] rounded-xl bg-ink-950/85 border border-white/10 px-3 py-2 text-[10px] text-ink-200 max-w-[190px]">
-        <div className="flex items-center gap-2 font-semibold"><span className="text-[#77d9f5]">●</span> Water stops · tap a blue pin</div>
-        <div className="mt-1 text-ink-400">Taps, shops & cafés · faded pins are estimated</div>
+      {ready && <div className="pointer-events-none absolute right-4 bottom-[145px] md:bottom-[130px] rounded-xl bg-ink-950/85 border border-white/10 px-3 py-2 text-[10px] text-ink-200 max-w-[190px]">
+        <div className="font-semibold">Tap a place pin for photos & details</div>
+        <div className="mt-1"><span className="text-[#77d9f5]">● Water</span> · <span className="text-[#ffd08a]">● Rest</span> · <span className="text-[#c4b5fd]">WC</span></div>
+        <div className="mt-1 text-ink-400">Faded pins are estimates · verify access</div>
       </div>}
       {!ready && (
         <div className="absolute inset-0 grid place-items-center">

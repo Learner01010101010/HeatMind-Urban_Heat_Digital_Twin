@@ -114,6 +114,8 @@ class Zone:
         if not ZONE_FILE.exists():
             build_zone()
         self.data = json.loads(ZONE_FILE.read_text(encoding="utf8"))
+        if self.data.get("meta", {}).get("amenities_version") != 3:
+            self.data = build_zone()
         R, C = geo.ROWS, geo.COLS
         self.shape = (R, C)
 

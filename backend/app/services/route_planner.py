@@ -20,6 +20,8 @@ from . import transit, transit_routing
 from .risk_scoring import CAUTION_C, PERSONAS, score_route
 from .routing_service import Path, StreetGraph
 from .zone import CODE_LABEL
+from .route_classifier import classify, explain_choice, usable_stop
+from .traffic import traffic_service
 
 # Four separable route accents, none of them blue and none of them borrowed from
 # the heat ramp, so a route chip can never be misread as a temperature.
@@ -35,6 +37,23 @@ SEGMENT_M = 24.0
 REST_NEAR_M = 50.0
 REST_RELIEF = 0.33
 REST_DETAILS = frozenset({"bench", "toilets"})
+
+
+def traffic_times(graph, field, mode, persona, model_seconds):
+    """Localize vehicle timing; walking keeps the existing pedestrian pace."""
+    seconds = model_seconds.copy()
+    if mode.key not in ("car", "bike", "cycle") or not field["live"].any():
+        return seconds
+    live = field["live"]
+    free_speed = modes_mod.speed_ms(mode, persona, congestion=0)
+    k = modes_mod.CONGESTION_SENSITIVITY[mode.key]
+    speed = free_speed * (1 - .5 * k * np.nan_to_num(field["congestion"]))
+    if mode.key in ("car", "bike"):
+        speed[live] = np.minimum(speed[live], np.maximum(field["speed_ms"][live], .3))
+    seconds[live] = graph.p_len[live] / np.maximum(speed[live], .3)
+    if mode.key in ("car", "bike"):
+        seconds[field["closed"]] = 1e9
+    return seconds
 
 
 class RoutePlanner:
@@ -53,7 +72,7 @@ class RoutePlanner:
     # ------------------------------------------------------------------
 
     def _rest_proximity(self) -> np.ndarray:
-        """Per-piece 0/1: is there a mapped bench or toilet within REST_NEAR_M?
+        """Per-piece 0/1: is mapped public rest/water within REST_NEAR_M?
 
         Cached on the planner: it is a pure function of the POI set and the street
         graph, and neither changes after startup.
@@ -67,7 +86,7 @@ class RoutePlanner:
         mid = self.graph.p_mid
         mask = np.zeros(len(mid), dtype=float)
         for poi in self.pois:
-            if (poi.get("detail") or "").lower() not in REST_DETAILS or poi.get("source") != "osm":
+            if not usable_stop(poi):
                 continue
             x, y = geo.to_xy(poi["lat"], poi["lon"])
             near = (np.abs(mid[:, 0] - x) <= REST_NEAR_M) & (np.abs(mid[:, 1] - y) <= REST_NEAR_M)
@@ -173,14 +192,29 @@ class RoutePlanner:
         # route onto a hot road because there is a bench on it. Combined with heat, as
         # asked, and bounded: a third off at most.
         #
-        # Be clear about the ceiling on this. The zone carries six mapped benches and
-        # no mapped toilets across 37 km2, so on most trips this changes nothing at
-        # all. It is wired to the real OSM amenities rather than to invented ones
-        # precisely so that the day the mapping improves, the routing does too.
-        if senior:
+        # Only mapped public amenities contribute; seeded demonstration points and
+        # private facilities cannot draw a route toward an unverified stop.
+        if senior or street_mode.key in ("walk", "cycle"):
             penalty = penalty * (1.0 - REST_RELIEF * self._rest_proximity())
 
         paths = g.candidate_paths(src, dst, piece_seconds, penalty, mode=street_mode)
+        traffic = traffic_service.route_field(g, paths, depart)
+        free_speed = modes_mod.speed_ms(street_mode, P, congestion=0)
+        free_seconds = g.p_len / free_speed
+        # Pedestrian pace is unaffected by vehicle flow; exposed road heat remains
+        # in the twin. Motor traffic can slow a vehicle or exclude a closed corridor.
+        if traffic["live"].any():
+            piece_seconds = traffic_times(g, traffic, street_mode, P, piece_seconds)
+            feels_t, expo_t, inten_t = self._at_arrival(g, src, piece_seconds, frames, pvs,
+                limit_s=TIMELINE_OFFSETS[-1] * 60.0, mode=street_mode)
+            penalty = (np.clip(feels_t - ref, 0, None) / 4 + .6 * expo_t * inten_t) * street_mode.heat_exposure
+            # Congested-road preference is a separate routing cost, not fabricated
+            # degrees or pollutant exposure added to the calibrated heat model.
+            penalty += .35 * np.nan_to_num(traffic["congestion"]) * street_mode.heat_exposure
+            if senior or street_mode.key in ("walk", "cycle"):
+                penalty *= 1 - REST_RELIEF * self._rest_proximity()
+            paths = g.candidate_paths(src, dst, piece_seconds, penalty, mode=street_mode)
+            paths = [p for p in paths if not traffic["closed"][g.path_pieces(p)[0]].any()] if street_mode.key in ("car", "bike") else paths
         if not paths:
             raise ValueError(f"No {M.label.lower()} connection between these points.")
         pinned_ids: set[int] = set()
@@ -194,7 +228,8 @@ class RoutePlanner:
                 pinned_ids.add(dup)
 
         cid = compare_id or uuid.uuid4().hex[:10]
-        routes = [self._build_route(cid, i, p, P, persona, frames, pvs, street_mode, speed)
+        routes = [self._build_route(cid, i, p, P, persona, frames, pvs, street_mode, speed,
+                                   piece_seconds=piece_seconds, traffic=traffic, free_seconds=free_seconds)
                   for i, p in enumerate(paths)]
 
         # A bus trip is not one of these routes: it is a walk, a wait and a ride, each
@@ -229,9 +264,11 @@ class RoutePlanner:
         coolest = min(street, key=lambda r: (r["metrics"]["heat_dose"], r["heat_risk_score"]))
         limit = fastest["metrics"]["duration_min"] * 1.5 + 4
         eligible = [r for r in street if r["metrics"]["duration_min"] <= limit] or street
-        best_alt = min(eligible, key=lambda r: (r["heat_risk_score"], r["metrics"]["duration_min"]))
+        best_alt = min(eligible, key=lambda r: (r["optimization"]["score"], r["metrics"]["duration_min"]))
         # Only send people on a detour when it meaningfully lowers their risk
-        recommended = best_alt if best_alt["heat_risk_score"] <= fastest["heat_risk_score"] - 1.5 else fastest
+        recommended = best_alt if best_alt["optimization"]["score"] <= fastest["optimization"]["score"] - 2 else fastest
+        for r in street:
+            explain_choice(r, fastest)
         for r in routes:
             if r is fastest:
                 r["tags"].append("fastest")
@@ -384,11 +421,12 @@ class RoutePlanner:
 
     # ------------------------------------------------------------------
     def _build_route(self, cid: str, i: int, path: Path, P: dict, persona: str, frames, pvs,
-                     M, speed_ms: float) -> dict:
+                     M, speed_ms: float, *, piece_seconds=None, traffic=None, free_seconds=None) -> dict:
         g = self.graph
         idx, fwd = g.path_pieces(path)
         lens = g.p_len[idx]
-        secs = lens / speed_ms
+        secs = piece_seconds[idx] if piece_seconds is not None else lens / speed_ms
+        speed_ms = float(lens.sum() / max(secs.sum(), 1e-6))
         cum = np.cumsum(lens) - lens / 2
         total = float(lens.sum())
 
@@ -402,13 +440,13 @@ class RoutePlanner:
                 k = int(np.argmin(d[:, pi]))
                 along.append({**self.pois[pi], "at_m": round(float(cum[k])), "off_route_m": round(float(near[pi]))})
             along.sort(key=lambda p: p["at_m"])
-        stop_pos = [p["at_m"] for p in along if p["type"] in ("water", "rest", "cooling_center", "shade")]
+        stop_pos = [p["at_m"] for p in along if usable_stop(p)]
 
         # Minutes into the walk at the middle of each piece. Within a chosen route this
         # is exact -- cumulative distance over pace -- so no estimate is involved.
         walk_min = (np.cumsum(secs) - secs / 2) / 60.0
         stacks = {k: np.stack([pv[k][idx] for pv in pvs])
-                  for k in ("feels", "exposure", "surface_excess", "asphalt")}
+                  for k in ("feels", "exposure", "surface_excess", "asphalt", "industrial_c", "traffic_heat_c")}
         intens = np.asarray([f.intensity for f in frames], dtype=float)
 
         forecast, scored0 = [], None
@@ -457,6 +495,7 @@ class RoutePlanner:
                 segs.append({
                     "coords": [[round(a, 6), round(b, 6)] for a, b in coords],
                     "length_m": round(float(w.sum()), 1),
+                    "duration_seconds": round(float(secs[ks].sum()), 3),
                     "start_m": round(float(cum[ks[0]] - lens[ks[0]] / 2)),
                     "name": self.road_names[road_i] or self._fallback_name(road_i),
                     "surface": CODE_LABEL[int(np.bincount(codes.astype(int), weights=w, minlength=8).argmax())],
@@ -467,7 +506,7 @@ class RoutePlanner:
                 cur, acc = [], 0.0
 
         geometry = [list(g.node_ll[n]) for n in path.nodes]
-        return {
+        result = {
             "id": f"{cid}-{i}", "_path_index": i, "tags": [], "label": "", "title": "", "color": "",
             "geometry": geometry, "duration_min": scored0["metrics"]["duration_min"],
             "distance_m": scored0["metrics"]["distance_m"],
@@ -477,6 +516,12 @@ class RoutePlanner:
             "breaks": breaks, "mode": M.key, "mode_label": M.label,
             "speed_kmh": round(speed_ms * 3.6, 1),
         }
+        if traffic is not None:
+            cond = self._along_walk(walk_min, stacks, intens)
+            result["optimization"] = classify(result, industrial=cond["industrial_c"], traffic_heat=cond["traffic_heat_c"],
+                seconds=secs, lengths=lens, traffic={k: v[idx] if isinstance(v, np.ndarray) else v for k, v in traffic.items()},
+                free_seconds=free_seconds[idx])
+        return result
 
     #: How much of the sun reaches a rider during each leg of a bus trip. Walking and
     #: waiting at an open kerb are full exposure; a shelter or a bus removes most of it.

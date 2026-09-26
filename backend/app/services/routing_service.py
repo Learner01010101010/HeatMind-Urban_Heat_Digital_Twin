@@ -181,7 +181,11 @@ class StreetGraph:
         on_roof = surf_code == SURFACES["roof"][0]
         rr = np.where(on_roof, self.p_r, rr)
         cc = np.where(on_roof, self.p_c, cc)
+        from .anthropogenic import industrial_field
+        industrial = industrial_field(self.zone, f.when)[rr, cc]
         return {
+            "industrial_c": industrial.astype(np.float32),
+            "traffic_heat_c": np.maximum(f.anthro[rr, cc] - industrial, 0).astype(np.float32),
             "feels": f.feels[rr, cc],
             "exposure": f.exposure[rr, cc],
             "surface_excess": f.t_surface[rr, cc] - f.weather.air_c,

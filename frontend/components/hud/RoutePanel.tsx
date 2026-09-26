@@ -14,6 +14,7 @@ import HeatProfileChart from "@/components/ui/HeatProfileChart";
 import RiskRing from "@/components/ui/RiskRing";
 import { StartNavButton } from "./NavHud";
 import { AdvisoryRoutePermission } from "./CityOpsAdvisory";
+import RouteOptimization from "./RouteOptimization";
 
 /** Glyph per travel mode, matching ModeSelector. */
 const MODE_ICON: Record<string, typeof Footprints> = {
@@ -155,6 +156,7 @@ export default function RoutePanel({ route }: { route: Route }) {
       )}
 
       <StartNavButton route={route} />
+      <RouteOptimization key={route.id} route={route} />
 
       <div className="grid grid-cols-2 gap-2.5">
         {[

@@ -82,6 +82,14 @@ export interface Poi {
   lon: number;
   source: "osm" | "seeded";
   detail?: string;
+  osm_ref?: string;
+  opening_hours?: string;
+  operator?: string;
+  access?: string;
+  fee?: string;
+  wheelchair?: string;
+  drinking_water?: string;
+  covered?: string;
   at_m?: number;
   off_route_m?: number;
 }
@@ -207,6 +215,7 @@ export interface RouteStep {
 }
 
 export interface Route {
+  optimization?: RouteOptimization;
   id: string;
   label: string;
   title: string;
@@ -446,12 +455,24 @@ export interface BreakPlan {
   note: string;
 }
 
+export interface RouteOptimization {
+  method: "rule_based";
+  score: number;
+  rating: string;
+  factors: { key: string; label: string; value: string; raw: number; weight: number; source: string }[];
+  reasons: string[];
+  mapped_stops: number;
+  industrial: { mean_c: number; peak_c: number; exposure_min: number; heat_dose_c_min: number; note: string };
+  traffic: { live: boolean; coverage_pct: number; delay_min: number; congestion: number | null; observed_at: string | null; heat_mean_c: number; note: string };
+  note: string;
+}
+
 export interface NearbyPhotos {
   available: boolean;
   reason: "ok" | "no_coverage" | "no_provider" | "provider_error";
   note?: string;
   attribution?: string;
-  photos: { id: string; url: string; captured_at?: number; bearing?: number }[];
+  photos: { id: string; url: string; captured_at?: number | null; bearing?: number; kind?: "place" | "nearby"; distance_m?: number; attribution?: string; source_url?: string }[];
 }
 
 export interface ZoneData {
@@ -474,6 +495,8 @@ export interface SignalProps {
 }
 
 export interface PointSample {
+  industrial_heat_c?: number;
+  heat_source_note?: string;
   lat: number;
   lon: number;
   feels_c: number;
@@ -674,8 +697,8 @@ export const api = {
     req<PlannerReport>(`/api/planner/report?${qs(p)}`),
   communityPois: () => req<GeoJSON.FeatureCollection<GeoJSON.Point, { kind: CommunityPoiKind; name: string; status: string; source: "community" }>>("/api/community/pois?status=approved"),
   openDataCatalog: () => req<OpenDataCatalog>("/api/open-data"),
-  photosNearby: (p: { lat: number; lon: number }) =>
-    req<NearbyPhotos>(`/api/photo/nearby?${qs(p)}`),
+  photosNearby: (p: { lat: number; lon: number; poi_id?: string }, signal?: AbortSignal) =>
+    req<NearbyPhotos>(`/api/photo/nearby?${qs(p)}`, { signal }),
   intervene: (p: {
     lat: number;
     lon: number;

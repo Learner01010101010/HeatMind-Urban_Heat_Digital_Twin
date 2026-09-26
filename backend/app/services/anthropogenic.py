@@ -168,7 +168,7 @@ def describe(zone: Zone, when: datetime) -> dict:
         "time": when.isoformat(),
         "traffic": {
             "congestion_factor": round(congestion_factor(when), 2),
-            "source": "live feed" if _override else "modelled Pune diurnal profile",
+            "source": "live road-speed samples + modelled heat conversion" if _override and _override(when) is not None else "modelled Pune diurnal profile",
             "mean_c": round(float(traf[walk].mean()), 2),
             "max_c": round(float(traf[walk].max()), 2),
             "peak_hours": "09:00-11:00 and 18:00-20:00 on weekdays",
@@ -181,9 +181,8 @@ def describe(zone: Zone, when: datetime) -> dict:
             "max_c": round(float(ind[walk].max()), 2),
             "sources": industrial_sources(zone),
         },
-        "note": "Anthropogenic heat is modelled, not measured. There is no free real-time "
-                "traffic feed for this zone and the OSM extract contains no industrial tags; "
-                "see services/anthropogenic.py for the profiles used.",
+        "note": "Traffic and industrial waste heat are modelled, not measured radiation or air-pollution emissions. "
+                "Optional TomTom speed observations are used only when fresh; unobserved roads and future times use the model.",
     }
 
 
