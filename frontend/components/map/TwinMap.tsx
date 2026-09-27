@@ -294,9 +294,12 @@ export default function TwinMap() {
       // static centre-line on the selected route (no motion — routes update in place)
       map.addLayer({
         id: "route-traffic", type: "line", source: "route-seg",
-        filter: ["all", ["==", ["get", "jam"], true], ["==", ["get", "sel"], true]],
+        filter: ["==", ["get", "jam"], true],
         layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": ["get", "t"], "line-width": ["interpolate", ["linear"], ["zoom"], 12, 5, 18, 11], "line-opacity": 0.95 },
+        paint: { "line-color": ["get", "t"], "line-width": ["interpolate", ["linear"], ["zoom"],
+            12, ["case", ["==", ["get", "sel"], true], 5, 3],
+            18, ["case", ["==", ["get", "sel"], true], 11, 6]],
+          "line-opacity": ["case", ["==", ["get", "sel"], true], 0.95, 0.75] },
       });
       map.addLayer({ id: "route-core", type: "line", source: "routes", filter: ["get", "sel"], layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": "#ffffff", "line-width": 1.5, "line-opacity": 0.85 } });
       addFlatMapDetails(map);
