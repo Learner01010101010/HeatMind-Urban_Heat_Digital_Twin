@@ -3,7 +3,6 @@
 export type Persona = "student" | "worker" | "senior" | "cyclist" | "gig_worker";
 /** How the trip is made — orthogonal to persona. See backend services/modes.py. */
 export type TravelMode = "walk" | "cycle" | "bike" | "car" | "bus";
-export type RouteObjective = "balanced" | "fastest" | "shortest" | "coolest";
 export type Scenario = "demo" | "live";
 
 export interface Weather {
@@ -231,8 +230,6 @@ export interface Route {
   transit?: TransitPlan;
   steps: RouteStep[];
   tags: ("fastest" | "shortest" | "coolest" | "recommended" | "current" | "transit")[];
-  objective_roles?: RouteObjective[];
-  pareto?: boolean;
   geometry: [number, number][];
   duration_min: number;
   distance_m: number;
@@ -249,17 +246,6 @@ export interface Route {
 }
 
 export interface CompareResult {
-  route_engine?: {
-    objective: RouteObjective;
-    method: "multi_algorithm_rules";
-    trained_ml: false;
-    choices: Record<RouteObjective, string>;
-    pareto_ids: string[];
-    algorithms: string[];
-    note: string;
-    monitor: { check_seconds: number; traffic_cache_seconds: number; weather_cache_seconds: number };
-    training: { available: boolean; examples: number | null; label_source: "rule_derived"; file: string };
-  };
   compare_id: string;
   persona: Persona;
   persona_label: string;
@@ -737,7 +723,6 @@ export const api = {
     mode?: TravelMode;
     /** Senior Mode: prefer streets with a mapped bench or toilet within 50 m. */
     senior?: boolean;
-    objective?: RouteObjective;
   }) => req<CompareResult>("/api/routes/compare", { method: "POST", json: body }),
   busStops: () => req<GeoJSON.FeatureCollection<GeoJSON.Point, BusStop>>("/api/transit/stops"),
   simulate: (body: { compare_id: string; route_id?: string; simulate: { time_offset_min: number; temp_delta_c: number } }) =>

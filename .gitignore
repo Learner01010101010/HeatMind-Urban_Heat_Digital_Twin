@@ -3,6 +3,8 @@ backend/.venv/
 __pycache__/
 *.pyc
 backend/data/*.sqlite3
+# Optional area ML models; reproducible with scripts/train_area_correction.py.
+backend/data/ml/
 
 # Node / Next
 frontend/node_modules/

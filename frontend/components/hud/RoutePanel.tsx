@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDownUp, Bike, Bus, Car, Check, ChevronDown, Droplets, Footprints, Loader2, Moon, Route as RouteIcon, Sparkles, Thermometer, TreePine, TriangleAlert, Zap } from "lucide-react";
+import { ArrowDownUp, Bike, Bus, Car, Check, ChevronDown, Droplets, Footprints, Loader2, Moon, Route as RouteIcon, Thermometer, TreePine, TriangleAlert, Zap } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api, type Route } from "@/lib/api";
@@ -190,7 +190,7 @@ export default function RoutePanel({ route }: { route: Route }) {
         ))}
       </div>
 
-      <Section title="Why this score" right={polished?.id === route.id ? <span className="flex items-center gap-1 text-[11px] text-cool-300"><Sparkles size={11} /> AI</span> : <span className="text-[11px] text-ink-500">transparent · rule-based</span>}>
+      <Section title="Why this score">
         <div className="rounded-[22px] bg-white/[0.035] p-4">
           <p className="text-[14px] text-ink-100 leading-relaxed">{polished?.id === route.id ? polished.text : route.explanation.summary}</p>
           <ul className="mt-3 space-y-2.5">

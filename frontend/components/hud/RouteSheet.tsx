@@ -1,16 +1,14 @@
 "use client";
 
-import { Bus, ChevronDown, ChevronLeft, ChevronRight, Clock3, Droplets, Footprints, Hourglass, Sun, TreePine, TriangleAlert } from "lucide-react";
+import { Bus, ChevronDown, ChevronLeft, ChevronRight, Clock3, Footprints, Hourglass, TriangleAlert } from "lucide-react";
 import type { CompareResult, Route } from "@/lib/api";
 import { fmtClock, fmtDist, riskColor } from "@/lib/heatColorScale";
 import { personaOf } from "@/lib/personas";
 import { atTime, useMap, usePrefs } from "@/lib/store";
-import AnimatedNumber from "@/components/ui/AnimatedNumber";
 import RiskRing from "@/components/ui/RiskRing";
 import RoutePanel from "./RoutePanel";
 import TransitLegs from "./TransitLegs";
 import RouteRecommendationLine from "./RouteRecommendationLine";
-import RouteEngineControls from "./RouteEngineControls";
 
 const TAG: Record<string, string> = { recommended: "Recommended", fastest: "Fastest", shortest: "Shortest", coolest: "Least heat dose", current: "Your route" };
 
@@ -43,8 +41,7 @@ function metrics(r: Route, fastest: Route, timeMin: number) {
 /** One compact comparison row: time · live risk · shade · water · sun-exposure reduction. */
 function Row({ r, fastest, timeMin, selected, compare }: { r: Route; fastest: Route; timeMin: number; selected: boolean; compare: CompareResult }) {
   const set = useMap((s) => s.set);
-  const { shade, score, red, water } = metrics(r, fastest, timeMin);
-  const isFastest = r.id === fastest.id;
+  const { score } = metrics(r, fastest, timeMin);
   const pick = r.id === compare.recommended_id;
   return (
     <div
@@ -52,7 +49,7 @@ function Row({ r, fastest, timeMin, selected, compare }: { r: Route; fastest: Ro
       tabIndex={0}
       onClick={() => (selected ? set({ routeView: "detail" }) : set({ selectedRouteId: r.id }))}
       onKeyDown={(e) => e.key === "Enter" && (selected ? set({ routeView: "detail" }) : set({ selectedRouteId: r.id }))}
-      className={`press relative rounded-[20px] pl-3 pr-2.5 py-2.5 cursor-pointer ${pick ? "bg-cool-300/10" : selected ? "bg-white/[0.08]" : "hover:bg-white/[0.04]"}`}
+      className={`press relative rounded-[20px] pl-3 pr-2.5 py-2 cursor-pointer ${pick ? "bg-cool-300/10" : selected ? "bg-white/[0.08]" : "hover:bg-white/[0.04]"}`}
       style={{ boxShadow: pick ? `inset 0 0 0 2px #8ad8b0${selected ? `, 0 0 0 1px ${r.color}` : ""}` : selected ? `inset 0 0 0 1.5px ${r.color}` : undefined }}
       aria-pressed={selected}
       aria-label={`${r.label}${pick ? ", Recommended" : ""}`}
@@ -60,7 +57,7 @@ function Row({ r, fastest, timeMin, selected, compare }: { r: Route; fastest: Ro
       data-recommended={pick}
     >
       <div className="flex items-center gap-3">
-      <RiskRing score={score} size={46} stroke={4} />
+      <RiskRing score={score} size={36} stroke={3} />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
           <span className="grid place-items-center w-[18px] h-[18px] rounded-full text-[10px] font-bold text-ink-950 shrink-0" style={{ background: r.color }}>
@@ -82,22 +79,7 @@ function Row({ r, fastest, timeMin, selected, compare }: { r: Route; fastest: Ro
             </span>
             <span className="truncate">{r.transit.board.shelter ? "sheltered stop" : "open stop"}</span>
           </div>
-        ) : (
-        <div className="flex items-center gap-2.5 mt-1 text-[11.5px] text-ink-400 tabular">
-          <span className="flex items-center gap-0.5">
-            <TreePine size={11} className="text-cool-300" />
-            <AnimatedNumber value={shade} suffix="%" />
-          </span>
-          <span className="flex items-center gap-0.5">
-            <Droplets size={11} className="text-sky-glow" />
-            {water}
-          </span>
-          <span className="flex items-center gap-0.5" style={{ color: isFastest ? undefined : red > 0.5 ? "#9dc06a" : "#fca5a5" }}>
-            <Sun size={11} className="text-heat-4" />
-            {isFastest ? "base" : `${red > 0 ? "−" : "+"}${Math.abs(Math.round(red))}%`}
-          </span>
-        </div>
-        )}
+        ) : null}
       </div>
       <div className="text-right leading-none shrink-0">
         <div className="text-[22px] font-semibold tracking-[-0.04em] tabular text-ink-100">
@@ -185,19 +167,17 @@ export default function RouteSheet({ compare, variant }: { compare: CompareResul
 
   if (variant === "side") {
     return (
-      <div className={`glass-strong rounded-[26px] flex flex-col w-[340px] overflow-hidden transition-[max-height] duration-500 ${open ? (detail ? "max-h-[calc(100dvh-420px)]" : "max-h-[calc(100dvh-420px)]") : "max-h-[52px]"}`}>
+      <div className={`glass-strong rounded-[26px] flex flex-col w-[380px] overflow-hidden transition-[max-height] duration-500 ${open ? "max-h-[calc(100dvh-235px)]" : "max-h-[52px]"}`}>
         {header}
         {open && (
           <div className="flex-1 min-h-0 overflow-y-auto scroll-thin px-2.5 pb-3 fade-in">
             {detail ? (
               <div className="px-2 pt-1 space-y-2">
-                <RouteEngineControls compare={compare} />
                 {route.transit ? <TransitLegs plan={route.transit} /> : null}
                 <RoutePanel route={route} />
               </div>
             ) : (
               <div className="space-y-1.5">
-                <RouteEngineControls compare={compare} />
                 {routes.map((r) => (
                   <Row key={r.id} r={r} fastest={fastest} timeMin={timeMin} selected={r.id === selected} compare={compare} />
                 ))}
@@ -223,9 +203,12 @@ export default function RouteSheet({ compare, variant }: { compare: CompareResul
             const sel = r.id === selected;
             const pick = r.id === compare.recommended_id;
             return (
-              <button
+              <div
                 key={r.id}
+                role="button"
+                tabIndex={0}
                 onClick={() => (sel ? set({ routeView: "detail", sheetOpen: true }) : set({ selectedRouteId: r.id }))}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); if (sel) set({ routeView: "detail", sheetOpen: true }); else set({ selectedRouteId: r.id }); } }}
                 className="press shrink-0 rounded-[18px] p-2.5 w-[260px] text-left"
                 style={{ background: pick ? "rgba(138,216,176,.10)" : sel ? `${r.color}26` : "rgba(255,255,255,.04)", boxShadow: pick ? "inset 0 0 0 2px #8ad8b0" : sel ? `inset 0 0 0 1.5px ${r.color}` : "none" }}
                 aria-pressed={sel}
@@ -247,7 +230,7 @@ export default function RouteSheet({ compare, variant }: { compare: CompareResul
                 </span>
                 </span>
                 <RouteRecommendationLine route={r} compare={compare} compact />
-              </button>
+              </div>
             );
           })}
         </div>
@@ -255,12 +238,10 @@ export default function RouteSheet({ compare, variant }: { compare: CompareResul
         <div className="flex-1 min-h-0 overflow-y-auto scroll-thin px-2.5 pb-3">
           {detail ? (
             <div className="px-2 pt-1">
-              <RouteEngineControls compare={compare} />
               <RoutePanel route={route} />
             </div>
           ) : (
             <div className="space-y-1.5">
-              <RouteEngineControls compare={compare} />
               {routes.map((r) => (
                 <Row key={r.id} r={r} fastest={fastest} timeMin={timeMin} selected={r.id === selected} compare={compare} />
               ))}

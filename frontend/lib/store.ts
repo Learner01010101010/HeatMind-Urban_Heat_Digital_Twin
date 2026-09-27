@@ -206,8 +206,6 @@ interface MapState {
    * its opening state, which is precisely when someone needs it back.
    */
   locationPanelOpen: boolean;
-  /** Where a simulated jam sits, so the map can draw the thing being avoided. */
-  jam: { lat: number; lon: number; radius_m: number } | null;
   set: (p: Partial<Omit<MapState, "set">>) => void;
 }
 
@@ -239,6 +237,5 @@ export const useMap = create<MapState>()((set) => ({
   selectedBreak: null,
   emergencyOpen: false,
   locationPanelOpen: false,
-  jam: null,
   set: (p) => set(p),
 }));

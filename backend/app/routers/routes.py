@@ -2,13 +2,31 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 from fastapi.concurrency import run_in_threadpool
+from pydantic import BaseModel, Field
 
-from ..schemas import CompareRequest, RecheckRequest, SimulateRequest
+from ..schemas import CompareRequest, SimulateRequest
 from ..services import geo
 from ..services.route_planner import get_planner
 from .common import resolve_time
 
 router = APIRouter(prefix="/api/routes", tags=["routing"])
+
+
+class AdviceRequest(BaseModel):
+    route_id: str = Field(min_length=1, max_length=100)
+
+
+@router.post("/advice")
+async def advice(req: AdviceRequest):
+    from ..services.route_advice import generate_advice
+    found = get_planner().find_route(req.route_id)
+    if not found:
+        raise HTTPException(404, "Trip expired; plan your route again.")
+    try:
+        return await generate_advice(found[0]["result"])
+    except Exception as exc:
+        # The route and its measurements remain available if local inference fails.
+        raise HTTPException(503, "Journey recommendations are temporarily unavailable. Please try again.") from exc
 
 
 @router.post("/compare")
@@ -28,7 +46,7 @@ async def compare(req: CompareRequest):
         return await run_in_threadpool(
             get_planner().compare, origin=(req.origin.lat, req.origin.lon),
             destination=(req.destination.lat, req.destination.lon), persona=req.persona, scenario=req.scenario,
-            depart=depart, temp_delta=req.temp_delta_c, mode=req.mode, senior=req.senior, objective=req.objective)
+            depart=depart, temp_delta=req.temp_delta_c, mode=req.mode, senior=req.senior)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -43,22 +61,6 @@ async def simulate(req: SimulateRequest):
     return await run_in_threadpool(planner.simulate, compare_id=cid, route_id=req.route_id,
                                    time_offset_min=req.simulate.time_offset_min,
                                    temp_delta_c=req.simulate.temp_delta_c)
-
-
-@router.post("/recheck")
-async def recheck_route(req: RecheckRequest):
-    from ..services.live_routing import recheck
-    if req.position and not geo.in_bbox(req.position.lat, req.position.lon, .002):
-        raise HTTPException(422, "Current position is outside the digital-twin zone.")
-    try:
-        return await run_in_threadpool(recheck, get_planner(), compare_id=req.compare_id, route_id=req.route_id,
-                                      position=(req.position.lat, req.position.lon) if req.position else None,
-                                      objective=req.objective, off_route=req.off_route,
-                                      temp_delta_c=req.temp_delta_c, demo_jam=req.demo_jam)
-    except KeyError as exc:
-        raise HTTPException(404, "Trip expired; plan the trip again.") from exc
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
 
 
 @router.get("/{route_id}")

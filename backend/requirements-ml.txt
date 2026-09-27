@@ -1,0 +1,3 @@
+# Optional; base requirements and physics-only startup are unchanged.
+xgboost==3.4.1
+scipy==1.18.1

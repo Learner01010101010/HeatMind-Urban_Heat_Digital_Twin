@@ -1,14 +1,11 @@
 "use client";
 
-import { Loader2, Navigation, RotateCcw, TrafficCone, X, Zap } from "lucide-react";
+import { Loader2, Navigation, RotateCcw, X, Zap } from "lucide-react";
 import { useState } from "react";
 import { resetSimulation, runSimulate } from "@/lib/actions";
 import { stopSimulation, stopWatch, useGeo } from "@/lib/geolocation";
 import { fmtDelta } from "@/lib/heatColorScale";
-import { checkLiveRoute } from "@/lib/liveRouting";
 import { startNavigation, stopNavigation, useNav } from "@/lib/navigation";
-import { useRouteEngine } from "@/lib/routeEngineState";
-import { TRAFFIC_BANDS } from "@/lib/trafficColorScale";
 import { useMap, usePrefs } from "@/lib/store";
 
 const PRESETS = [
@@ -72,35 +69,6 @@ export default function SimulateButton({ compact = false }: { compact?: boolean 
     useGeo.getState().set({ status: "idle", lat: null, lon: null, headingDeg: null, accuracyM: null });
   };
 
-  // ── simulated jam ──
-  const engine = useRouteEngine();
-
-  /**
-   * Drop a jam on the road ahead and let the live engine answer it.
-   *
-   * The backend places it on the remaining route, so it is unmistakably in the
-   * way, and every downstream consumer — travel time, the congestion penalty,
-   * candidate generation, the traffic factor — sees it as it would a real
-   * reading. Nothing here decides the new route.
-   */
-  /**
-   * Vehicle flow does not slow a pedestrian, and the model says so: walking has a
-   * congestion sensitivity of zero, cycling 0.15, against 0.45 for a two-wheeler
-   * and 0.75 for a car. On foot a jam can only change exposure, never arrival
-   * time, so the demo has to say that rather than imply a speed saving.
-   */
-  const jamMode = compare?.mode ?? "walk";
-  const jamCostsTime = jamMode !== "walk";
-
-  const jamAhead = () => {
-    useRouteEngine.getState().set({ demoJam: true });
-    void checkLiveRoute("jam");
-  };
-  const clearJam = () => {
-    useRouteEngine.getState().set({ demoJam: false, jam: null, axes: null });
-    void checkLiveRoute("jam");
-  };
-
   const apply = async (v: number) => {
     setD(v);
     await runSimulate(0, v);
@@ -119,7 +87,7 @@ export default function SimulateButton({ compact = false }: { compact?: boolean 
                 {fmtDelta(d, units, 0)}
               </div>
             </div>
-            <p className="text-[12px] text-ink-400 mb-3 leading-snug">{hasTrip ? "Routes re-score instantly. You'll get a reroute if a safer path appears." : "The twin repaints instantly. Plan a trip to see live rerouting."}</p>
+            <p className="text-[12px] text-ink-400 mb-3 leading-snug">{hasTrip ? "Compare how the changed temperature affects your routes." : "The twin repaints instantly. Plan a trip to compare heat exposure."}</p>
             <input type="range" className="hm-mini w-full" min={-4} max={10} step={0.5} value={d} onChange={(e) => setD(Number(e.target.value))} aria-label="Temperature change" />
             <div className="flex gap-1.5 mt-4">
               {PRESETS.map((p) => (
@@ -179,70 +147,6 @@ export default function SimulateButton({ compact = false }: { compact?: boolean 
                       </div>
                     </div>
                   )}
-
-                  {/* ── traffic jam ── */}
-                  <div className="mb-2.5 rounded-2xl bg-white/[0.04] p-2.5">
-                    <button
-                      onClick={engine.demoJam ? clearJam : jamAhead}
-                      disabled={engine.checking}
-                      className="press flex items-center gap-2 w-full text-left text-[12.5px] font-semibold text-ink-100 disabled:opacity-50"
-                    >
-                      <TrafficCone size={15} className={engine.demoJam ? "text-heat-4" : "text-cool-400"} />
-                      {engine.checking ? "Rerouting…" : engine.demoJam ? "Clear the jam" : "Simulate a traffic jam ahead"}
-                    </button>
-                    <p className="text-[10.5px] text-ink-400 leading-tight mt-1">
-                      {engine.demoJam
-                        ? `Jam on the road ahead at ${engine.jam ? `${engine.jam.speed_kmh} km/h over ${engine.jam.radius_m} m` : "walking pace"}. Simulated, never reported as a reading.`
-                        : "Puts a crawling jam on the road ahead and reroutes from where you are now."}
-                    </p>
-                    {!jamCostsTime && (
-                      <p className="text-[10px] text-[#ffc48a] leading-tight mt-1">
-                        On foot, traffic does not slow you — the model gives walking zero congestion
-                        sensitivity. Switch to two-wheeler or car for a jam that costs time.
-                      </p>
-                    )}
-                    {/* The route draws in these colours wherever traffic is known,
-                        so the scale has to be somewhere the viewer can see it. */}
-                    <ul className="flex flex-wrap gap-x-2.5 gap-y-1 mt-2" aria-label="Traffic colour scale">
-                      {TRAFFIC_BANDS.map((b) => (
-                        <li key={b.label} className="flex items-center gap-1 text-[9.5px] text-ink-400">
-                          <span className="w-3.5 h-1.5 rounded-full" style={{ background: b.color }} aria-hidden />
-                          {b.label}
-                        </li>
-                      ))}
-                    </ul>
-                    {engine.demoJam && engine.axes && (
-                      <div className="mt-2 pt-2 border-t border-white/10">
-                        <div className="text-[10px] font-bold uppercase tracking-wider text-ink-400 mb-1.5">
-                          New route vs old
-                        </div>
-                        <ul className="space-y-1">
-                          {engine.axes.map((a) => (
-                            <li key={a.label} className="flex items-baseline gap-2 text-[10.5px]">
-                              <span className="flex-1 min-w-0 text-ink-300 truncate">{a.label}</span>
-                              <span className="tabular text-ink-400">{a.before}{a.unit}</span>
-                              <span className="text-ink-500">→</span>
-                              <span
-                                className="tabular font-semibold"
-                                style={{ color: a.same ? "#adaaa5" : a.improved ? "#8ad8b0" : "#fb8a1f" }}
-                              >
-                                {a.after}{a.unit}
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                        {/* A detour is longer than the road it replaces almost by
-                            definition, so the axes are reported rather than claimed. */}
-                        <p className="text-[9.5px] text-ink-500 mt-1.5 leading-tight">
-                          Measured against the route you were on. Green improved, amber did not — a detour
-                          cannot beat the original on every axis at once.
-                        </p>
-                      </div>
-                    )}
-                    {engine.demoJam && !engine.axes && !engine.checking && (
-                      <p className="text-[10.5px] text-[#ffc48a] mt-1.5 leading-tight">{engine.message}</p>
-                    )}
-                  </div>
 
                   <button
                     onClick={stopAll}

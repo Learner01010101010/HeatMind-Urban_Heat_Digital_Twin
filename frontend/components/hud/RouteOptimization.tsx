@@ -11,11 +11,14 @@ export default function RouteOptimization({ route }: { route: Route }) {
   const c = route.optimization;
   const [tips, setTips] = useState<{ id: string; text: string[] } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(false);
   if (!c) return null;
   const color = c.score < 30 ? "#8ad8b0" : c.score < 60 ? "#ffd08a" : "#fca5a5";
   const getTips = async () => {
     setBusy(true);
+    setError(false);
     try { setTips({ id: route.id, text: await generateRouteAdvice(route) }); }
+    catch { setError(true); }
     finally { setBusy(false); }
   };
   return <section className="rounded-[22px] border border-white/10 bg-white/[0.035] p-4 space-y-3" aria-label="Route optimization checks">
@@ -49,9 +52,9 @@ export default function RouteOptimization({ route }: { route: Route }) {
     </div>
     <details className="text-[10px] text-ink-400"><summary className="cursor-pointer">How these checks work · index {c.score}/100</summary><p className="mt-2">{c.note}</p><p className="mt-1">{c.industrial.note}</p><p className="mt-1">{c.traffic.note}</p></details>
     <button onClick={getTips} disabled={busy} className="w-full rounded-xl bg-cool-300/10 text-cool-300 py-2.5 text-[12px] flex items-center justify-center gap-2 disabled:opacity-50">
-      {busy ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}{busy ? "Preparing tips…" : "Get local AI trip tips"}
+      {busy ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}{busy ? "Preparing tips…" : "Plan my journey"}
     </button>
-    <p className="text-[10px] text-ink-400">Rule-based expert system · no API key or usage quota.</p>
+    {error && <p role="status" className="text-[11px] text-ink-400">Journey tips are temporarily unavailable. Try again shortly.</p>}
     {tips?.id === route.id && <ul aria-live="polite" className="space-y-2 text-[12px] text-ink-200">{tips.text.map((tip) => <li key={tip} className="rounded-xl bg-cool-300/5 p-2.5">{tip}</li>)}</ul>}
   </section>;
 }

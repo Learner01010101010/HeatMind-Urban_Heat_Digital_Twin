@@ -9,6 +9,7 @@ import type { Route, RouteStep } from "@/lib/api";
 import { fmtDist } from "@/lib/heatColorScale";
 import { advance, cumulative, startNavigation, stepAt, stopNavigation, toStepScale, useNav } from "@/lib/navigation";
 import ModeToggle from "./ModeToggle";
+import RouteUpdateNotice from "./RouteUpdateNotice";
 
 /** Maneuver → glyph. Slight and sharp turns reuse the corner arrows, rotated by CSS. */
 function ManeuverIcon({ step, size = 30 }: { step: RouteStep; size?: number }) {
@@ -195,6 +196,8 @@ export default function NavHud({ route }: { route: Route }) {
           {arrived ? "Replay" : paused ? "Resume" : "Pause"}
         </button>}
       </div>
+
+      <RouteUpdateNotice route={route} arrived={arrived} />
 
       {/* ── progress ── */}
       <div className="h-1 bg-white/[0.06]">

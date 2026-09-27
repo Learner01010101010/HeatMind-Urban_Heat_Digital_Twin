@@ -2,7 +2,6 @@
 
 import { api, ApiError, type InterventionKind, type InterventionResult, type TravelMode } from "./api";
 import { SCENARIO, TIMELINE, useClock, useMap, usePrefs, type Endpoint } from "./store";
-import { useRouteEngine } from "./routeEngineState";
 
 let seq = 0;
 
@@ -15,13 +14,11 @@ export async function runCompare(opts: { silent?: boolean } = {}) {
   const p = usePrefs.getState();
   if (!m.origin || !m.destination) return;
   const my = ++seq;
-  if (!opts.silent) useRouteEngine.getState().set({ demoHeatDelta: 0, pending: null, lastChecked: null,
-    message: "Ready to monitor when navigation starts.", changes: [], switches: 0, error: null });
   if (!opts.silent) m.set({ loading: true, error: null });
   try {
     const base = useClock.getState().base;
     // A fresh comparison always starts from real (un-simulated) conditions at the live time.
-    const r = await api.compare({ origin: m.origin, destination: m.destination, persona: p.persona, mode: p.mode, senior: p.seniorMode, scenario: SCENARIO, depart_at: base, objective: useRouteEngine.getState().objective });
+    const r = await api.compare({ origin: m.origin, destination: m.destination, persona: p.persona, mode: p.mode, senior: p.seniorMode, scenario: SCENARIO, depart_at: base });
     if (my !== seq) return;
     const cur = useMap.getState();
     const prevLabel = cur.compare?.routes.find((x) => x.id === cur.selectedRouteId)?.label;

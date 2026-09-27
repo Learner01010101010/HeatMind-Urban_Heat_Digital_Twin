@@ -6,7 +6,7 @@
 
 Built from the [PRD](docs/HeatMind_AI_PRD.md). Pitch walkthrough: [docs/demo-script.md](docs/demo-script.md).
 
-Multi-algorithm routing and continuous navigation checks: [route engine guide](docs/route-engine.md).
+Route planning and AI journey explanations: [route engine guide](docs/route-engine.md).
 
 ---
 
@@ -232,7 +232,7 @@ OSM access, hours, fees and accessibility tags where recorded. Linked Wikimedia
 Commons/Wikidata photos include credits; Mapillary fallback is labelled nearby
 street imagery with distance and capture date. Missing coverage never substitutes
 a stock photo. Estimated points and shops are not public refill guarantees.
-Route trip tips use a local rule-based expert system, with no Gemini call or quota.
+Route trip tips use a local Qwen3 reasoning model through Ollama, with no Gemini call or provider quota.
 
 Validation: `python -m unittest discover -s tests -v` from `backend/`; `npm run build`
 and targeted ESLint from `frontend/`.
@@ -311,26 +311,20 @@ side, so the API is never exposed to the network. If the phone cannot connect,
 allow Node through the Windows firewall for private networks and check the laptop
 is not on a guest SSID that isolates clients.
 
-## Simulated traffic jam
+## Optional dynamic route suggestions
 
-The trip playback panel can drop a jam on the road ahead, so live rerouting can be
-demonstrated without waiting for real congestion to appear near the route. The
-backend places it on the remaining path from the traveller's current position and
-injects it into the same traffic field the router already consumes, so travel
-times, the congestion routing penalty, candidate generation and the traffic factor
-all respond exactly as they would to a real reading. The affected pieces are
-marked `simulated`, never carry an observation timestamp, and the response says so.
+Start navigation and enable **Suggest route updates**. The feature starts off.
+Changed conditions can raise a small **Conditions changed → Reroute?** notice.
+**Reroute** replans from the latest position using existing Dijkstra; **Continue**
+keeps the current route and pauses prompts for five minutes. There is no automatic
+route switch.
 
-With a jam active the reroute is chosen from the candidates that avoid it, ranked
-by how many of travel time, traffic delay, heat exposure, shade, water/rest stops
-and distance they improve. The panel then reports every axis, won or lost: a
-detour is longer than the road it replaces almost by definition, so it cannot beat
-the original on all six at once, and the comparison shows which ones it did win.
-
-Vehicle flow does not slow a pedestrian. Walking has a congestion sensitivity of
-zero in the model (cycling 0.15, two-wheeler 0.45, car 0.75), so on foot a jam
-changes exposure but never arrival time, and the panel says so rather than
-implying a saving. Run the demonstration on a two-wheeler or car.
+The optional XGBoost layer forecasts road conditions only. Its first area-specific
+models are trained from the Pune twin's modelled forecasts, not measured traffic
+or street sensors. Missing models/runtime fall back to physics/traffic. Existing
+heat maps, three-hour forecasts and normal APIs are unchanged. Installation,
+thresholds, limitations and the additive API are in the
+[dynamic rerouting guide](docs/dynamic-rerouting.md).
 
 ## Live micro-rest scheduling
 
@@ -356,20 +350,30 @@ calibration is changed.
 
 Every route card includes a short recommendation below its metrics; the planner's
 recommended ID stays highlighted in green even when another route is selected.
-The local symbolic expert system reads the existing heat dose, risk, street shade,
-public facilities, estimated industrial heat and available traffic coverage.
-It explains benefits and travel-time trade-offs without changing ranking, scoring,
-routes or persona weights. Its label states "Local AI · rule-based": this is an
-expert system, not a trained language model. Recommendations describe departure
-conditions, not a new ranking of the timeline's forecast previews. Transit is
-described separately and its assumed waiting time remains explicit.
+Exact visual tiles show time differences, estimated heat differences and public
+water points. Qwen3 generates a short sentence and practical tips from the
+server's route measurements, without changing route ranking or persona weights.
+The website omits implementation labels; traffic/heat estimate labels remain.
 
-The route trip-tips button also runs locally. It needs no API key or download and
-has no provider usage quota. Seeded/private facilities and shops are not promoted
-as drinking-water sources; mapped access remains unverified. The separate City
-Ops Advisory keeps its existing Gemini integration. Check the local inference
-rules with `node --experimental-strip-types --experimental-loader ./scripts/ts-test-loader.mjs --test scripts/test-route-recommendation.mjs`
-from `frontend/` (Node 22.6+).
+Install Ollama from https://ollama.com, then run `ollama pull qwen3:4b`.
+Keep Ollama running on the same computer as the backend. Optional backend
+configuration: `HEATMIND_OLLAMA_URL=http://127.0.0.1:11434` and
+`HEATMIND_ADVICE_MODEL=qwen3:4b`. No API key or per-request provider quota;
+the initial model download is about 2.5 GB and inference uses local hardware.
+
+The backend requests structured output in Qwen3's compact generation mode, sends only
+aggregate measurements (no coordinates or names), and returns final copy only.
+Extended thinking is optional via `HEATMIND_ADVICE_THINK=1`; slower hardware may
+exhaust the interactive deadline, so it is disabled by default.
+One bounded inference batch serves all comparison cards, cached for five minutes.
+Malformed output or inference failures show a retry message; exact measurements
+and navigation remain available. Generated prose can be imperfect and is not
+medical advice or a guarantee of safety. Public facility access is unverified.
+The separate City Ops Advisory retains its Gemini integration.
+
+Run `python -m unittest discover -s tests` in `backend/`, and
+`node --experimental-strip-types --experimental-loader ./scripts/ts-test-loader.mjs --test scripts/test-route-recommendation.mjs`
+in `frontend/` (Node 22.6+).
 
 ## Stack
 

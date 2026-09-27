@@ -13,8 +13,6 @@ import ModeSelector from "@/components/hud/ModeSelector";
 import NavHud from "@/components/hud/NavHud";
 import { ProfileButton, ProfilePanel } from "@/components/hud/Profile";
 import RouteSheet from "@/components/hud/RouteSheet";
-import LiveRouteMonitor from "@/components/hud/LiveRouteMonitor";
-import RouteEngineControls from "@/components/hud/RouteEngineControls";
 import SearchPill from "@/components/hud/SearchPill";
 import SimulateButton from "@/components/hud/SimulateButton";
 import Timeline from "@/components/hud/Timeline";
@@ -93,14 +91,12 @@ export default function Home() {
   return (
     <main className="fixed inset-0 overflow-clip bg-ink-950">
       <TwinMap />
-      <LiveRouteMonitor />
 
       {/* ── guidance: the only thing on screen while it runs ── */}
       {navRoute && (
         <div className="absolute top-0 inset-x-0 z-40 p-3 md:p-5 pt-[max(12px,env(safe-area-inset-top))] flex justify-center pointer-events-none">
           <div className="w-full max-w-[420px] max-h-[calc(100dvh-24px)] overflow-y-auto scroll-thin rounded-[26px] pointer-events-auto">
             <NavHud route={navRoute} />
-            {compare && <RouteEngineControls compare={compare} navigation />}
           </div>
         </div>
       )}
