@@ -8,6 +8,9 @@
   "scripts": {
     "predev": "node scripts/copy-maplibre-worker.mjs",
     "dev": "next dev --webpack",
+    "predev:mobile": "node scripts/copy-maplibre-worker.mjs && node scripts/lan-url.mjs --https",
+    "dev:mobile": "next dev --webpack --experimental-https",
+    "lan": "node scripts/lan-url.mjs",
     "dev:turbopack": "next dev",
     "predev:turbopack": "node scripts/copy-maplibre-worker.mjs",
     "prebuild": "node scripts/copy-maplibre-worker.mjs",

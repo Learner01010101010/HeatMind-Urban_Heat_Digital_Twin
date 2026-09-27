@@ -131,6 +131,9 @@ export interface Segment {
   canopy: number;
   feels: number[];
   exposure: number[];
+  /** 1 - current/free-flow speed over this stretch; null where nothing was observed. */
+  congestion: number | null;
+  congestion_source: "live" | "simulated" | null;
 }
 
 export interface ForecastPoint {

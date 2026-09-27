@@ -87,6 +87,12 @@ COLOR_MAX_C = 56.0
 # modelled Pune congestion curve and says so in /api/meta — it never fabricates a
 # live reading. Set it in backend/.env, which is gitignored.
 TOMTOM_KEY = os.environ.get("HEATMIND_TOMTOM_KEY", "")
+# A second free provider, so a demo is not blocked on one signup. HERE's Limited
+# plan allows 1,000 requests a day without a card; TomTom's free tier allows
+# 2,500. Whichever key is present is used; TOMTOM wins if both are.
+HERE_KEY = os.environ.get("HEATMIND_HERE_KEY", "")
+# "tomtom" | "here" | "" to pick automatically from the keys that are set.
+TRAFFIC_PROVIDER = os.environ.get("HEATMIND_TRAFFIC_PROVIDER", "").strip().lower()
 # Optional. Street-level photos for a water stop come from Mapillary when this
 # is set; the endpoint reports "no provider" and the client falls back to the
 # twin's own view of the spot when it is not. Server side only -- the browser

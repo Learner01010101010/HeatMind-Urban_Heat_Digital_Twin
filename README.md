@@ -263,6 +263,54 @@ citywide reduction or a population-impact estimate. Water refills are proposed
 access points only, with no temperature benefit assumed. Proposals export as PDF,
 assumptions and method included. Nothing modifies routes or the twin.
 
+## Live traffic, and running it on a phone
+
+### Traffic colours on the route
+
+Where congestion is known, the selected route is drawn over in traffic colours on
+the flat map: a muted teal for free-flowing, through amber, into **dark purple for
+heavy** and near-black purple for a stopped road. It is deliberately not the heat
+ramp — heat already owns green-through-red here, so a jammed road would otherwise
+read as a hot one. Segments below 20% congestion are not drawn at all, so the heat
+colouring underneath stays legible. The scale is shown in the trip playback panel.
+
+Congestion is per display segment and only where something was actually observed
+or simulated; an unmeasured road reports `null`, not zero, because "nobody looked"
+and "free flowing" are different claims.
+
+### Two free providers
+
+Live traffic needs a key. Both options are free and neither asks for a card:
+
+| Provider | Free allowance | Sign up |
+| --- | --- | --- |
+| TomTom Flow Segment Data | 2,500 requests/day | developer.tomtom.com |
+| HERE Traffic v7 flow | 1,000 requests/day | platform.here.com |
+
+Put one in `backend/.env` (`HEATMIND_TOMTOM_KEY` or `HEATMIND_HERE_KEY`) and
+restart the backend; `HEATMIND_TRAFFIC_PROVIDER` forces one when both are set.
+Both go through the same budget counter, cache, and acceptance test — finite,
+positive, confident, and near the point that was asked about — and the key travels
+as a query parameter that never appears in a logged URL. Without a key the twin
+keeps its modelled congestion curve and `/api/meta` says so; it never reports a
+reading it does not have.
+
+### On a phone, over the same Wi-Fi
+
+    npm --prefix frontend run dev:mobile
+
+It prints the address to type on the phone, then serves over HTTPS with a
+self-signed certificate. Accept the warning once. HTTPS is the part that matters:
+browsers refuse to hand GPS to a page that is not on `localhost`, so plain http
+gives you the map, routing and the trip simulation but no real position.
+
+`npm --prefix frontend run dev` also listens on the network — `npm --prefix
+frontend run lan` prints the address for it. Only the web port needs to be
+reachable: the backend stays on localhost and Next proxies `/api` to it server
+side, so the API is never exposed to the network. If the phone cannot connect,
+allow Node through the Windows firewall for private networks and check the laptop
+is not on a guest SSID that isolates clients.
+
 ## Simulated traffic jam
 
 The trip playback panel can drop a jam on the road ahead, so live rerouting can be

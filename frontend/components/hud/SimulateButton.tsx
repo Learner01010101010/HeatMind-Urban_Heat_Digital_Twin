@@ -8,6 +8,7 @@ import { fmtDelta } from "@/lib/heatColorScale";
 import { checkLiveRoute } from "@/lib/liveRouting";
 import { startNavigation, stopNavigation, useNav } from "@/lib/navigation";
 import { useRouteEngine } from "@/lib/routeEngineState";
+import { TRAFFIC_BANDS } from "@/lib/trafficColorScale";
 import { useMap, usePrefs } from "@/lib/store";
 
 const PRESETS = [
@@ -200,6 +201,16 @@ export default function SimulateButton({ compact = false }: { compact?: boolean 
                         sensitivity. Switch to two-wheeler or car for a jam that costs time.
                       </p>
                     )}
+                    {/* The route draws in these colours wherever traffic is known,
+                        so the scale has to be somewhere the viewer can see it. */}
+                    <ul className="flex flex-wrap gap-x-2.5 gap-y-1 mt-2" aria-label="Traffic colour scale">
+                      {TRAFFIC_BANDS.map((b) => (
+                        <li key={b.label} className="flex items-center gap-1 text-[9.5px] text-ink-400">
+                          <span className="w-3.5 h-1.5 rounded-full" style={{ background: b.color }} aria-hidden />
+                          {b.label}
+                        </li>
+                      ))}
+                    </ul>
                     {engine.demoJam && engine.axes && (
                       <div className="mt-2 pt-2 border-t border-white/10">
                         <div className="text-[10px] font-bold uppercase tracking-wider text-ink-400 mb-1.5">

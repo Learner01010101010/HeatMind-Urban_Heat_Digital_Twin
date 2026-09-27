@@ -7,6 +7,7 @@ import { runIntervention, setEndpoint } from "@/lib/actions";
 import { useBaseTime, useBusStops, useFrames, useMeta, useNearestFrame, usePois, useZone } from "@/lib/hooks";
 import { useGeo } from "@/lib/geolocation";
 import { fmtDelta, fmtTemp, heatColor, heatLabel, riskColor } from "@/lib/heatColorScale";
+import { trafficColor, TRAFFIC_VISIBLE_AT } from "@/lib/trafficColorScale";
 import { INTERVENTION_STYLE } from "@/lib/interventionStyle";
 import { POI_STYLE } from "@/lib/poiStyle";
 import { solarIntensity, solarPosition } from "@/lib/solar";
@@ -39,7 +40,7 @@ const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: 
 const TWIN_LAYERS: string[] = [];
 
 /** The flat map's route rendering. Hidden in the twin, which draws its own. */
-const FLAT_ROUTE_LAYERS = ["route-casing", "route-halo", "route-heat", "route-core"];
+const FLAT_ROUTE_LAYERS = ["route-casing", "route-halo", "route-heat", "route-traffic", "route-core"];
 maplibregl.setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
 const equityCache = new Map<string, Promise<EquityIndex>>();
 
@@ -291,6 +292,12 @@ export default function TwinMap() {
       map.addLayer({ id: "route-halo", type: "line", source: "routes", layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": ["get", "color"], "line-width": ["case", ["get", "sel"], 12, 6], "line-opacity": ["case", ["get", "sel"], 0.55, 0.28], "line-blur": ["case", ["get", "sel"], 2, 0] } });
       map.addLayer({ id: "route-heat", type: "line", source: "route-seg", layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": ["coalesce", ["feature-state", "c"], ["get", "c"]], "line-width": ["case", ["get", "sel"], 6, 3], "line-opacity": ["case", ["get", "sel"], 1, 0.5] } });
       // static centre-line on the selected route (no motion — routes update in place)
+      map.addLayer({
+        id: "route-traffic", type: "line", source: "route-seg",
+        filter: ["all", ["==", ["get", "jam"], true], ["==", ["get", "sel"], true]],
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": ["get", "t"], "line-width": ["interpolate", ["linear"], ["zoom"], 12, 5, 18, 11], "line-opacity": 0.95 },
+      });
       map.addLayer({ id: "route-core", type: "line", source: "routes", filter: ["get", "sel"], layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": "#ffffff", "line-width": 1.5, "line-opacity": 0.85 } });
       addFlatMapDetails(map);
       addWaterStopLayers(map);
@@ -900,7 +907,13 @@ export default function TwinMap() {
         r.segments.map((s, i) => ({
           type: "Feature" as const,
           id: `${r.id}:${i}`,
-          properties: { c: heatColor(atTime(s.feels, time)), sel: r.id === selected },
+          properties: {
+            c: heatColor(atTime(s.feels, time)), sel: r.id === selected,
+            // Traffic rides on the same segments as heat, in its own colour and
+            // its own layer, so a jammed road cannot be mistaken for a hot one.
+            t: s.congestion != null ? trafficColor(s.congestion) : "#00000000",
+            jam: s.congestion != null && s.congestion >= TRAFFIC_VISIBLE_AT,
+          },
           geometry: { type: "LineString" as const, coordinates: s.coords.map(([la, lo]) => [lo, la]) },
         })),
       ),

@@ -14,18 +14,84 @@ from datetime import datetime, timezone
 import httpx
 import numpy as np
 
-from ..config import DATA_DIR, TOMTOM_KEY
+from ..config import DATA_DIR, HERE_KEY, TOMTOM_KEY, TRAFFIC_PROVIDER
 from . import anthropogenic, geo, jam_sim
 
 FLOW_URL = "https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json"
+HERE_FLOW_URL = "https://data.traffic.hereapi.com/v7/flow"
+# How wide a circle HERE is asked about. Small enough that the answer is about
+# this corridor rather than the neighbourhood.
+HERE_RADIUS_M = 150
+
+
+def _tomtom_request(lat, lon, key):
+    return FLOW_URL, {"key": key, "point": f"{lat},{lon}", "unit": "KMPH"}
+
+
+def _tomtom_parse(payload):
+    """TomTom Flow Segment Data -> the fields the twin uses, or None."""
+    d = payload["flowSegmentData"]
+    cur, free, confidence = float(d["currentSpeed"]), float(d["freeFlowSpeed"]), float(d["confidence"])
+    coords = [(float(p["latitude"]), float(p["longitude"])) for p in d["coordinates"]["coordinate"]]
+    return cur, free, confidence, coords, d.get("roadClosure") is True
+
+
+def _here_request(lat, lon, key):
+    return HERE_FLOW_URL, {"apiKey": key, "locationReferencing": "shape",
+                           "in": f"circle:{lat},{lon};r={HERE_RADIUS_M}"}
+
+
+def _here_parse(payload):
+    """HERE Traffic v7 flow -> the same fields.
+
+    HERE returns every link in the circle; the twin wants one reading for the
+    corridor, so this takes the most congested link with a usable shape. Speeds
+    are metres per second there and km/h in TomTom, so they are converted here
+    rather than leaving two units to collide downstream.
+    """
+    best = None
+    for item in payload.get("results", []):
+        flow = item.get("currentFlow") or {}
+        links = ((item.get("location") or {}).get("shape") or {}).get("links") or []
+        points = [p for link in links for p in (link.get("points") or [])]
+        coords = [(float(p["lat"]), float(p["lng"])) for p in points]
+        speed, free = flow.get("speed"), flow.get("freeFlow")
+        if speed is None or free is None or len(coords) < 2:
+            continue
+        cur_kmh, free_kmh = float(speed) * 3.6, float(free) * 3.6
+        # HERE's confidence is 0..1 already; jamFactor 0..10 is a fallback signal.
+        confidence = float(flow.get("confidence", 0) or 0)
+        candidate = (cur_kmh, free_kmh, confidence, coords, float(flow.get("jamFactor", 0) or 0) >= 10)
+        if best is None or cur_kmh / max(free_kmh, 1e-6) < best[0] / max(best[1], 1e-6):
+            best = candidate
+    return best
 TTL_S = 300
 MAX_SAMPLES = 4
 MOTOR_ROADS = {"trunk", "trunk_link", "primary", "primary_link", "secondary", "tertiary", "residential", "unclassified"}
 
 
+PROVIDERS = {
+    "tomtom": {"label": "TomTom Flow Segment Data", "request": _tomtom_request, "parse": _tomtom_parse},
+    "here": {"label": "HERE Traffic v7 flow", "request": _here_request, "parse": _here_parse},
+}
+
+
+def _pick_provider(key, provider):
+    """Which free provider to use, from whichever key is configured."""
+    if key is not None:
+        return provider or "tomtom", key
+    if provider in PROVIDERS:
+        return provider, {"tomtom": TOMTOM_KEY, "here": HERE_KEY}[provider]
+    if TOMTOM_KEY:
+        return "tomtom", TOMTOM_KEY
+    if HERE_KEY:
+        return "here", HERE_KEY
+    return "tomtom", ""
+
+
 class TrafficService:
-    def __init__(self, key=None, budget_path=None):
-        self.key = TOMTOM_KEY if key is None else key
+    def __init__(self, key=None, budget_path=None, provider=None):
+        self.provider, self.key = _pick_provider(key, (provider or TRAFFIC_PROVIDER or "").lower())
         self.budget_path = budget_path or DATA_DIR / "traffic_usage.json"
         try:
             self.monthly_limit = max(0, min(18000, int(os.environ.get("HEATMIND_TRAFFIC_MONTHLY_LIMIT", "18000"))))
@@ -80,21 +146,28 @@ class TrafficService:
                     if now < self._retry_at or time.monotonic() > deadline or not self._consume_credit():
                         break
                     try:
-                        r = client.get(FLOW_URL, params={"key": self.key, "point": f"{lat},{lon}", "unit": "KMPH"})
+                        spec = PROVIDERS[self.provider]
+                        url, params = spec["request"](lat, lon, self.key)
+                        r = client.get(url, params=params)
                         if r.status_code in (401, 403, 429):
                             self._retry_at = now + 900
                             self.last_error = "provider_limit" if r.status_code == 429 else "provider_auth"
                             break
                         r.raise_for_status()
-                        d = r.json()["flowSegmentData"]
-                        cur, free, confidence = float(d["currentSpeed"]), float(d["freeFlowSpeed"]), float(d["confidence"])
-                        coords = [(float(p["latitude"]), float(p["longitude"])) for p in d["coordinates"]["coordinate"]]
+                        parsed = spec["parse"](r.json())
+                        if parsed is None:
+                            self.last_error = "no_usable_reading"
+                            continue
+                        cur, free, confidence, coords, closed = parsed
+                        # Same acceptance test for every provider: a reading has to
+                        # be finite, positive, confident and actually near the point
+                        # that was asked about.
                         if (not all(np.isfinite([cur, free, confidence])) or cur < 0 or free <= 0 or confidence < .5 or len(coords) < 2
                                 or any(abs(a - lat) > .03 or abs(b - lon) > .03 for a, b in coords)):
                             self.last_error = "no_usable_reading"
                             continue
                         item = {"congestion": float(np.clip(1 - cur / free, 0, 1)), "speed_ms": cur / 3.6,
-                                "closed": d.get("roadClosure") is True, "confidence": confidence, "coords": coords,
+                                "closed": closed, "confidence": confidence, "coords": coords,
                                 "fetched": time.time(), "observed_at": datetime.now(timezone.utc).isoformat()}
                         self._cache[bucket] = item
                         readings.append(item)
@@ -167,7 +240,9 @@ class TrafficService:
 
     def describe(self):
         fresh = [v for v in list(self._cache.values()) if time.time() - v["fetched"] < TTL_S]
-        return {"source": "tomtom" if fresh else "modelled", "live": bool(fresh),
+        return {"source": self.provider if fresh else "modelled", "live": bool(fresh),
+                "provider": self.provider, "provider_label": PROVIDERS[self.provider]["label"],
+                "configured": bool(self.key),
                 "reason": self.last_error, "samples": len(fresh), "monthly_limit": self.monthly_limit,
                 "observed_at": max((v["observed_at"] for v in fresh), default=None),
                 "resolution": "sampled road corridors; remaining roads modelled", "max_age_seconds": TTL_S}

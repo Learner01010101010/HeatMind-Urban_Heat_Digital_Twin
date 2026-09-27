@@ -40,6 +40,27 @@ REST_RELIEF = 0.33
 REST_DETAILS = frozenset({"bench", "toilets"})
 
 
+def _segment_traffic(field, pieces, weights) -> dict:
+    """Length-weighted congestion for one display segment.
+
+    Only the pieces that actually carry a reading count towards the mean, so a
+    segment that is half observed reports the congestion of the observed half
+    rather than a value diluted by roads nobody measured.
+    """
+    if field is None:
+        return {"congestion": None, "congestion_source": None}
+    known = field["live"][pieces]
+    if not known.any():
+        return {"congestion": None, "congestion_source": None}
+    values = np.nan_to_num(field["congestion"][pieces])
+    w = weights[known]
+    simulated = field.get("simulated")
+    return {
+        "congestion": round(float((values[known] * w).sum() / max(w.sum(), 1e-6)), 3),
+        "congestion_source": "simulated" if simulated is not None and simulated[pieces][known].any() else "live",
+    }
+
+
 def traffic_times(graph, field, mode, persona, model_seconds):
     """Localize vehicle timing; walking keeps the existing pedestrian pace."""
     seconds = model_seconds.copy()
@@ -511,6 +532,10 @@ class RoutePlanner:
                     "canopy": round(float((pvs[0]["canopy"][idx[ks]] * w).sum() / w.sum()), 2),
                     "feels": [round(float((pv["feels"][idx[ks]] * w).sum() / w.sum()), 1) for pv in pvs],
                     "exposure": [round(float((pv["exposure"][idx[ks]] * w).sum() / w.sum()), 2) for pv in pvs],
+                    # Congestion over this stretch, so the line can be drawn in
+                    # traffic colours. None where nothing was observed or simulated:
+                    # an unobserved road is not a free-flowing one.
+                    **_segment_traffic(traffic, idx[ks], w),
                 })
                 cur, acc = [], 0.0
 
